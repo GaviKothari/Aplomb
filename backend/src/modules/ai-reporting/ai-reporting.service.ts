@@ -33,13 +33,23 @@ const REPORT_FIELD_SCHEMA = `{
 @Injectable()
 export class AiReportingService {
   private readonly logger = new Logger(AiReportingService.name);
-  private openai: OpenAI;
+  private openai: OpenAI | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
   ) {
-    this.openai = new OpenAI({ apiKey: this.config.get('openai.apiKey') });
+    const apiKey = this.config.get<string>('openai.apiKey');
+    if (apiKey) {
+      this.openai = new OpenAI({ apiKey });
+    } else {
+      this.logger.warn('OPENAI_API_KEY not set — AI reporting features disabled');
+    }
+  }
+
+  private get ai(): OpenAI {
+    if (!this.openai) throw new BadRequestException('AI features are not configured on this server');
+    return this.openai;
   }
 
   async startSession(caseId: string, userId: string, language = 'en') {
@@ -57,7 +67,7 @@ export class AiReportingService {
     const systemPrompt = this.buildSystemPrompt(caseData, language);
     const greeting = await this.chat(session.id, systemPrompt, 'SYSTEM', false);
 
-    const welcome = await this.openai.chat.completions.create({
+    const welcome = await this.ai.chat.completions.create({
       model: this.config.get('openai.model'),
       messages: [
         { role: 'system', content: systemPrompt },
@@ -100,7 +110,7 @@ export class AiReportingService {
       { role: 'user', content },
     ];
 
-    const completion = await this.openai.chat.completions.create({
+    const completion = await this.ai.chat.completions.create({
       model: this.config.get('openai.model'),
       messages,
       max_tokens: 500,
@@ -124,7 +134,7 @@ export class AiReportingService {
     fs.writeFileSync(tempPath, audioBuffer);
 
     try {
-      const transcription = await this.openai.audio.transcriptions.create({
+      const transcription = await this.ai.audio.transcriptions.create({
         file: fs.createReadStream(tempPath),
         model: 'whisper-1',
         language: undefined, // auto-detect language
@@ -164,7 +174,7 @@ export class AiReportingService {
       .map((m) => `${m.role}: ${m.content}`)
       .join('\n');
 
-    const completion = await this.openai.chat.completions.create({
+    const completion = await this.ai.chat.completions.create({
       model: this.config.get('openai.visionModel'),
       messages: [
         {
@@ -192,7 +202,7 @@ export class AiReportingService {
   }
 
   async analyzePhoto(imageBase64: string, caseId: string) {
-    const response = await this.openai.chat.completions.create({
+    const response = await this.ai.chat.completions.create({
       model: this.config.get('openai.visionModel'),
       messages: [
         {
