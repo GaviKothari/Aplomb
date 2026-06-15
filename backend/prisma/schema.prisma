@@ -1,0 +1,1166 @@
+// APLOMB — Property Valuation Management Platform
+// Complete PostgreSQL Schema via Prisma ORM
+// Version 1.0
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearch", "fullTextIndex"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum UserRole {
+  ADMIN
+  COORDINATOR
+  ENGINEER
+  VERIFIER
+  HR
+  ACCOUNTS
+}
+
+enum CaseStatus {
+  NEW
+  ASSIGNED
+  SITE_VISIT_SCHEDULED
+  SITE_VISIT_IN_PROGRESS
+  SITE_VISIT_COMPLETED
+  UNDER_VERIFICATION
+  REVISION_REQUESTED
+  FINALIZED
+  SENT_TO_BANK
+  ON_HOLD
+  CLOSED
+}
+
+enum CasePriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum PropertyType {
+  RESIDENTIAL_APARTMENT
+  RESIDENTIAL_INDEPENDENT
+  RESIDENTIAL_VILLA
+  RESIDENTIAL_PLOT
+  COMMERCIAL_OFFICE
+  COMMERCIAL_RETAIL
+  COMMERCIAL_WAREHOUSE
+  INDUSTRIAL
+  AGRICULTURAL
+  MIXED_USE
+}
+
+enum ConstructionStage {
+  VACANT_LAND
+  FOUNDATION
+  PLINTH
+  UNDER_CONSTRUCTION
+  COMPLETED
+  SEMI_FINISHED
+  OLD_CONSTRUCTION
+}
+
+enum ReportStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  REVISION_REQUESTED
+  FINALIZED
+}
+
+enum VerificationDecision {
+  APPROVED
+  REJECTED
+  REVISION_REQUESTED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  HALF_DAY
+  LEAVE
+  HOLIDAY
+  WORK_FROM_HOME
+}
+
+enum LeaveType {
+  ANNUAL
+  SICK
+  CASUAL
+  COMPENSATORY
+  UNPAID
+  MATERNITY
+  PATERNITY
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum ExpenseStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PAID
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PARTIAL
+  COMPLETE
+}
+
+enum MediaType {
+  PHOTO
+  VIDEO
+  DOCUMENT
+}
+
+enum MediaCategory {
+  FRONT_VIEW
+  REAR_VIEW
+  LEFT_VIEW
+  RIGHT_VIEW
+  INTERIOR
+  SURROUNDING
+  DOCUMENT
+  SITE_PLAN
+  OTHER
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  IN_APP
+  PUSH
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+  READ
+}
+
+enum DemolitionMatchStatus {
+  POTENTIAL
+  CONFIRMED
+  DISMISSED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  STATUS_CHANGE
+  ASSIGNMENT
+  DOWNLOAD
+  LOGIN
+  LOGOUT
+  APPROVE
+  REJECT
+  EXPORT
+}
+
+// ============================================================
+// USER & AUTH
+// ============================================================
+
+model User {
+  id               String    @id @default(cuid())
+  clerkId          String?   @unique
+  email            String    @unique
+  phone            String?   @unique
+  name             String
+  role             UserRole
+  avatarUrl        String?
+  isActive         Boolean   @default(true)
+  lastLoginAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  employee              Employee?
+  coordinatedCases      Case[]               @relation("CaseCoordinator")
+  assignedEngineerCases Case[]               @relation("CaseEngineer")
+  assignedVerifierCases Case[]               @relation("CaseVerifier")
+  createdCases          Case[]               @relation("CaseCreatedBy")
+  verifications         Verification[]
+  auditLogs             AuditLog[]
+  notifications         Notification[]
+  aiChatSessions        AiChatSession[]
+  reportRevisions       Report[]
+  sentNotifications     NotificationLog[]
+
+  @@map("users")
+}
+
+// ============================================================
+// ORGANIZATION / BANK / CLIENT
+// ============================================================
+
+model Organization {
+  id              String   @id @default(cuid())
+  name            String
+  type            String   @default("BANK") // BANK, NBFC, HFC, PRIVATE
+  contactName     String?
+  contactEmail    String?
+  contactPhone    String?
+  address         String?
+  city            String?
+  state           String?
+  pincode         String?
+  gstin           String?
+  panNumber       String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  cases           Case[]
+  rateCards       RateCard[]
+  invoices        Invoice[]
+
+  @@map("organizations")
+}
+
+model RateCard {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  propertyType   PropertyType
+  rateAmount     Decimal      @db.Decimal(10, 2)
+  currency       String       @default("INR")
+  isActive       Boolean      @default(true)
+  effectiveFrom  DateTime     @default(now())
+  effectiveTo    DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, propertyType, effectiveFrom])
+  @@map("rate_cards")
+}
+
+// ============================================================
+// CASES
+// ============================================================
+
+model Case {
+  id               String       @id @default(cuid())
+  caseNumber       String       @unique // APL/2024/06/0001
+  organizationId   String
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  caseType         String
+  propertyType     PropertyType
+  priority         CasePriority @default(MEDIUM)
+  status           CaseStatus   @default(NEW)
+
+  // Property Details
+  propertyAddress  String
+  propertyCity     String
+  propertyState    String
+  propertyPincode  String
+  latitude         Decimal?     @db.Decimal(10, 8)
+  longitude        Decimal?     @db.Decimal(11, 8)
+  googleMapsUrl    String?
+  surveyNumber     String?
+  propertyArea     Decimal?     @db.Decimal(10, 2)
+  propertyAreaUnit String?      @default("sqft")
+
+  // Owner Details
+  ownerName        String
+  ownerContact     String?
+  ownerEmail       String?
+  ownerAadhaar     String?      // Encrypted
+  coOwnerName      String?
+
+  // Bank Reference
+  loanAccountNumber String?
+  applicationNumber String?
+  branchName        String?
+  bankContactName   String?
+  bankContactEmail  String?
+
+  // Assignment
+  coordinatorId    String?
+  coordinator      User?        @relation("CaseCoordinator", fields: [coordinatorId], references: [id])
+  engineerId       String?
+  engineer         User?        @relation("CaseEngineer", fields: [engineerId], references: [id])
+  verifierId       String?
+  verifier         User?        @relation("CaseVerifier", fields: [verifierId], references: [id])
+
+  // Scheduling
+  siteVisitDate    DateTime?
+  siteVisitStartAt DateTime?
+  siteVisitEndAt   DateTime?
+  siteVisitDuration Int?        // minutes
+
+  // SLA
+  slaDeadline      DateTime?
+  slaBreach        Boolean      @default(false)
+
+  // Notes & Flags
+  notes            String?
+  isOnHold         Boolean      @default(false)
+  holdReason       String?
+  isDuplicate      Boolean      @default(false)
+  duplicateOfId    String?
+  hasDemolitionAlert Boolean   @default(false)
+
+  createdById      String
+  createdBy        User         @relation("CaseCreatedBy", fields: [createdById], references: [id])
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  statusHistory    CaseStatusHistory[]
+  documents        CaseDocument[]
+  media            CaseMedia[]
+  reports          Report[]
+  verifications    Verification[]
+  travelLogs       TravelLog[]
+  demolitionAlerts DemolitionAlert[]
+  invoiceItems     InvoiceLineItem[]
+  auditLogs        AuditLog[]
+  siteVisitLog     SiteVisitLog?
+
+  @@index([organizationId])
+  @@index([engineerId])
+  @@index([status])
+  @@index([priority])
+  @@index([propertyPincode])
+  @@index([createdAt])
+  @@map("cases")
+}
+
+model CaseStatusHistory {
+  id          String     @id @default(cuid())
+  caseId      String
+  case        Case       @relation(fields: [caseId], references: [id])
+  fromStatus  CaseStatus?
+  toStatus    CaseStatus
+  changedById String
+  reason      String?
+  notes       String?
+  changedAt   DateTime   @default(now())
+
+  @@index([caseId])
+  @@map("case_status_history")
+}
+
+model SiteVisitLog {
+  id            String   @id @default(cuid())
+  caseId        String   @unique
+  case          Case     @relation(fields: [caseId], references: [id])
+  startLatitude  Decimal? @db.Decimal(10, 8)
+  startLongitude Decimal? @db.Decimal(11, 8)
+  endLatitude    Decimal? @db.Decimal(10, 8)
+  endLongitude   Decimal? @db.Decimal(11, 8)
+  arrivalTime    DateTime?
+  departureTime  DateTime?
+  durationMinutes Int?
+  distanceTravelled Decimal? @db.Decimal(10, 2) // km
+  routeGeoJson   Json?     // GeoJSON LineString
+  engineerNotes  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("site_visit_logs")
+}
+
+model BulkImport {
+  id            String   @id @default(cuid())
+  fileName      String
+  totalRows     Int
+  successRows   Int      @default(0)
+  failedRows    Int      @default(0)
+  errorDetails  Json?
+  importedById  String
+  organizationId String?
+  status        String   @default("PROCESSING") // PROCESSING, COMPLETED, FAILED
+  s3Key         String?
+  createdAt     DateTime @default(now())
+  completedAt   DateTime?
+
+  @@map("bulk_imports")
+}
+
+// ============================================================
+// DOCUMENTS & MEDIA
+// ============================================================
+
+model CaseDocument {
+  id           String   @id @default(cuid())
+  caseId       String
+  case         Case     @relation(fields: [caseId], references: [id])
+  fileName     String
+  fileType     String   // pdf, jpg, docx, etc.
+  fileSizeBytes Int
+  s3Key        String
+  s3Bucket     String
+  cdnUrl       String?
+  category     String?  // title_deed, noc, identity_proof, etc.
+  uploadedById String
+  createdAt    DateTime @default(now())
+
+  @@index([caseId])
+  @@map("case_documents")
+}
+
+model CaseMedia {
+  id              String        @id @default(cuid())
+  caseId          String
+  case            Case          @relation(fields: [caseId], references: [id])
+  mediaType       MediaType
+  category        MediaCategory @default(OTHER)
+  fileName        String
+  fileSizeBytes   Int
+  s3Key           String
+  s3Bucket        String
+  cdnUrl          String?
+  thumbnailUrl    String?
+  // EXIF data
+  capturedAt      DateTime?
+  captureLatitude  Decimal?  @db.Decimal(10, 8)
+  captureLongitude Decimal?  @db.Decimal(11, 8)
+  // AI analysis
+  aiQualityScore  Int?      // 0-100
+  isBlurry        Boolean   @default(false)
+  isDuplicate     Boolean   @default(false)
+  aiAnalysis      Json?     // AI vision analysis result
+  uploadedById    String
+  createdAt       DateTime  @default(now())
+
+  @@index([caseId])
+  @@map("case_media")
+}
+
+// ============================================================
+// REPORTS
+// ============================================================
+
+model Report {
+  id              String       @id @default(cuid())
+  reportNumber    String       @unique // APL/2024/06/0001
+  caseId          String
+  case            Case         @relation(fields: [caseId], references: [id])
+  revision        Int          @default(0) // 0 = original, 1 = R1, etc.
+  status          ReportStatus @default(DRAFT)
+
+  // Property Information
+  propertyDescription String?
+  propertyType        PropertyType?
+  constructionStage   ConstructionStage?
+  totalFloors         Int?
+  occupiedFloors      Int?
+  totalArea           Decimal?  @db.Decimal(10, 2)
+  builtUpArea         Decimal?  @db.Decimal(10, 2)
+  carpetArea          Decimal?  @db.Decimal(10, 2)
+  plotArea            Decimal?  @db.Decimal(10, 2)
+  ageOfConstruction   Int?      // years
+  roadWidth           Decimal?  @db.Decimal(5, 2) // meters
+  facingDirection     String?
+
+  // Valuation
+  landRatePerSqFt     Decimal?  @db.Decimal(10, 2)
+  buildingRatePerSqFt Decimal?  @db.Decimal(10, 2)
+  landValue           Decimal?  @db.Decimal(14, 2)
+  buildingValue       Decimal?  @db.Decimal(14, 2)
+  totalMarketValue    Decimal?  @db.Decimal(14, 2)
+  distressValue       Decimal?  @db.Decimal(14, 2)
+  valuationAsOn       DateTime?
+
+  // Site Observations
+  siteObservations    String?
+  boundaryDescription String?
+  amenities           String[]
+  localityFeatures    String[]
+  nearbyLandmarks     String?
+  marketabilityRating Int?      // 1-5
+  liquidityRating     Int?      // 1-5
+
+  // AI-Generated Content
+  aiGeneratedContent  Json?     // Raw AI output
+  aiConfidenceScore   Decimal?  @db.Decimal(5, 2)
+  aiChatSessionId     String?
+
+  // PDF
+  pdfS3Key            String?
+  pdfCdnUrl           String?
+  pdfGeneratedAt      DateTime?
+
+  submittedById       String
+  submittedBy         User       @relation(fields: [submittedById], references: [id])
+  submittedAt         DateTime?
+  finalizedAt         DateTime?
+  sentToBankAt        DateTime?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  verifications       Verification[]
+  reportFields        ReportField[]
+  parentReport        Report?    @relation("ReportRevisions", fields: [parentReportId], references: [id])
+  parentReportId      String?
+  revisions           Report[]   @relation("ReportRevisions")
+
+  @@index([caseId])
+  @@index([status])
+  @@map("reports")
+}
+
+model ReportField {
+  id         String  @id @default(cuid())
+  reportId   String
+  report     Report  @relation(fields: [reportId], references: [id])
+  fieldKey   String
+  fieldLabel String
+  fieldValue String?
+  fieldType  String  @default("TEXT") // TEXT, NUMBER, DATE, BOOLEAN
+  isRequired Boolean @default(false)
+  aiGenerated Boolean @default(false)
+  editedByHuman Boolean @default(false)
+
+  @@unique([reportId, fieldKey])
+  @@map("report_fields")
+}
+
+// ============================================================
+// VERIFICATION
+// ============================================================
+
+model Verification {
+  id              String               @id @default(cuid())
+  caseId          String
+  case            Case                 @relation(fields: [caseId], references: [id])
+  reportId        String
+  report          Report               @relation(fields: [reportId], references: [id])
+  verifierId      String
+  verifier        User                 @relation(fields: [verifierId], references: [id])
+  decision        VerificationDecision?
+  overallComment  String?
+  revisionNotes   String?
+  verifiedAt      DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  fieldVerifications VerificationField[]
+  comments           VerificationComment[]
+
+  @@index([caseId])
+  @@index([verifierId])
+  @@map("verifications")
+}
+
+model VerificationField {
+  id             String      @id @default(cuid())
+  verificationId String
+  verification   Verification @relation(fields: [verificationId], references: [id])
+  fieldKey       String
+  engineerValue  String?
+  bankValue      String?
+  isMatch        Boolean?
+  discrepancy    String?
+  isAccepted     Boolean?    @default(false)
+  comment        String?
+
+  @@unique([verificationId, fieldKey])
+  @@map("verification_fields")
+}
+
+model VerificationComment {
+  id             String      @id @default(cuid())
+  verificationId String
+  verification   Verification @relation(fields: [verificationId], references: [id])
+  authorId       String
+  fieldKey       String?
+  comment        String
+  isResolved     Boolean     @default(false)
+  createdAt      DateTime    @default(now())
+
+  @@index([verificationId])
+  @@map("verification_comments")
+}
+
+// ============================================================
+// AI CHAT SESSIONS
+// ============================================================
+
+model AiChatSession {
+  id          String   @id @default(cuid())
+  caseId      String?
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  sessionType String   @default("REPORTING") // REPORTING, INSIGHTS, SUPPORT
+  language    String   @default("en")
+  status      String   @default("ACTIVE") // ACTIVE, COMPLETED, ABANDONED
+  tokenCount  Int      @default(0)
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+
+  messages AiChatMessage[]
+
+  @@index([userId])
+  @@index([caseId])
+  @@map("ai_chat_sessions")
+}
+
+model AiChatMessage {
+  id              String        @id @default(cuid())
+  sessionId       String
+  session         AiChatSession @relation(fields: [sessionId], references: [id])
+  role            String        // USER, ASSISTANT, SYSTEM
+  content         String
+  // Voice
+  audioS3Key      String?
+  transcription   String?
+  detectedLanguage String?
+  // AI metadata
+  model           String?
+  promptTokens    Int?
+  completionTokens Int?
+  createdAt       DateTime      @default(now())
+
+  @@index([sessionId])
+  @@map("ai_chat_messages")
+}
+
+// ============================================================
+// EMPLOYEES
+// ============================================================
+
+model Employee {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id])
+  employeeCode    String   @unique
+  department      String
+  designation     String
+  reportingTo     String?
+  joinDate        DateTime
+  confirmationDate DateTime?
+  exitDate        DateTime?
+  employmentType  String   @default("FULL_TIME") // FULL_TIME, PART_TIME, CONTRACT
+
+  // Personal
+  dateOfBirth     DateTime?
+  gender          String?
+  bloodGroup      String?
+  maritalStatus   String?
+  permanentAddress String?
+  currentAddress  String?
+  emergencyName   String?
+  emergencyPhone  String?
+  emergencyRelation String?
+
+  // KYC (encrypted)
+  aadhaarNumber   String?  // Encrypted
+  panNumber       String?  // Encrypted
+  passbookNumber  String?  // Encrypted
+  bankName        String?
+  bankIFSC        String?
+
+  // Documents S3 keys
+  aadhaarS3Key    String?
+  panS3Key        String?
+  drivingLicenseS3Key String?
+  agreementS3Key  String?
+  photoS3Key      String?
+
+  // Payroll config
+  basicSalary     Decimal?  @db.Decimal(10, 2)
+  hra             Decimal?  @db.Decimal(10, 2)
+  otherAllowances Decimal?  @db.Decimal(10, 2)
+  pfEnabled       Boolean   @default(false)
+  esiEnabled      Boolean   @default(false)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  attendanceRecords AttendanceRecord[]
+  leaveRequests     LeaveRequest[]
+  travelExpenses    TravelExpense[]
+  travelLogs        TravelLog[]
+  payrollEntries    PayrollEntry[]
+  leaveBalance      LeaveBalance[]
+
+  @@map("employees")
+}
+
+// ============================================================
+// ATTENDANCE
+// ============================================================
+
+model AttendanceRecord {
+  id             String           @id @default(cuid())
+  employeeId     String
+  employee       Employee         @relation(fields: [employeeId], references: [id])
+  date           DateTime         @db.Date
+  status         AttendanceStatus @default(PRESENT)
+  punchInAt      DateTime?
+  punchOutAt     DateTime?
+  workHours      Decimal?         @db.Decimal(5, 2)
+  // Geofence
+  punchInLatitude   Decimal?     @db.Decimal(10, 8)
+  punchInLongitude  Decimal?     @db.Decimal(11, 8)
+  punchOutLatitude  Decimal?     @db.Decimal(10, 8)
+  punchOutLongitude Decimal?     @db.Decimal(11, 8)
+  officeLocationId  String?
+  officeLocation    OfficeLocation? @relation(fields: [officeLocationId], references: [id])
+  distanceFromOffice Decimal?    @db.Decimal(8, 2) // meters
+  isWithinGeofence  Boolean?
+  // Engineer-specific
+  casesWorked    String[]        // array of case IDs
+  // Admin override
+  markedById     String?
+  overrideReason String?
+  notes          String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@unique([employeeId, date])
+  @@index([employeeId])
+  @@index([date])
+  @@map("attendance_records")
+}
+
+model OfficeLocation {
+  id             String   @id @default(cuid())
+  name           String
+  address        String
+  city           String
+  state          String?
+  latitude       Decimal  @db.Decimal(10, 8)
+  longitude      Decimal  @db.Decimal(11, 8)
+  radiusMeters   Int      @default(200)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  attendanceRecords AttendanceRecord[]
+
+  @@map("office_locations")
+}
+
+model LeaveBalance {
+  id           String    @id @default(cuid())
+  employeeId   String
+  employee     Employee  @relation(fields: [employeeId], references: [id])
+  year         Int
+  leaveType    LeaveType
+  totalDays    Int
+  usedDays     Int       @default(0)
+  pendingDays  Int       @default(0)
+  remainingDays Int
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([employeeId, year, leaveType])
+  @@map("leave_balances")
+}
+
+model LeaveRequest {
+  id           String      @id @default(cuid())
+  employeeId   String
+  employee     Employee    @relation(fields: [employeeId], references: [id])
+  leaveType    LeaveType
+  startDate    DateTime    @db.Date
+  endDate      DateTime    @db.Date
+  totalDays    Int
+  reason       String
+  status       LeaveStatus @default(PENDING)
+  approvedById String?
+  approvalNote String?
+  approvedAt   DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([employeeId])
+  @@map("leave_requests")
+}
+
+// ============================================================
+// TRAVEL & EXPENSES
+// ============================================================
+
+model TravelLog {
+  id             String   @id @default(cuid())
+  employeeId     String
+  employee       Employee @relation(fields: [employeeId], references: [id])
+  caseId         String?
+  case           Case?    @relation(fields: [caseId], references: [id])
+  date           DateTime @db.Date
+  startLatitude  Decimal  @db.Decimal(10, 8)
+  startLongitude Decimal  @db.Decimal(11, 8)
+  endLatitude    Decimal  @db.Decimal(10, 8)
+  endLongitude   Decimal  @db.Decimal(11, 8)
+  distanceKm     Decimal  @db.Decimal(8, 2)
+  routeGeoJson   Json?
+  startAddress   String?
+  endAddress     String?
+  startAt        DateTime
+  endAt          DateTime?
+  vehicleType    String?  // TWO_WHEELER, FOUR_WHEELER, PUBLIC_TRANSPORT
+  notes          String?
+  createdAt      DateTime @default(now())
+
+  travelExpense  TravelExpense?
+
+  @@index([employeeId])
+  @@map("travel_logs")
+}
+
+model TravelExpense {
+  id             String        @id @default(cuid())
+  employeeId     String
+  employee       Employee      @relation(fields: [employeeId], references: [id])
+  travelLogId    String?       @unique
+  travelLog      TravelLog?    @relation(fields: [travelLogId], references: [id])
+  date           DateTime      @db.Date
+  distanceKm     Decimal       @db.Decimal(8, 2)
+  ratePerKm      Decimal       @db.Decimal(5, 2)
+  amount         Decimal       @db.Decimal(10, 2)
+  description    String?
+  receiptS3Key   String?
+  status         ExpenseStatus @default(PENDING)
+  approvedById   String?
+  approvalNote   String?
+  approvedAt     DateTime?
+  paidAt         DateTime?
+  payrollEntryId String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([employeeId])
+  @@map("travel_expenses")
+}
+
+// ============================================================
+// BILLING & INVOICING
+// ============================================================
+
+model Invoice {
+  id              String        @id @default(cuid())
+  invoiceNumber   String        @unique // INV/2024/06/001
+  organizationId  String
+  organization    Organization  @relation(fields: [organizationId], references: [id])
+  periodStart     DateTime      @db.Date
+  periodEnd       DateTime      @db.Date
+  subtotal        Decimal       @db.Decimal(14, 2)
+  taxAmount       Decimal       @db.Decimal(14, 2) @default(0)
+  totalAmount     Decimal       @db.Decimal(14, 2)
+  currency        String        @default("INR")
+  status          InvoiceStatus @default(DRAFT)
+  paymentStatus   PaymentStatus @default(PENDING)
+  paidAmount      Decimal       @db.Decimal(14, 2) @default(0)
+  dueDate         DateTime      @db.Date
+  pdfS3Key        String?
+  pdfCdnUrl       String?
+  notes           String?
+  generatedById   String
+  sentAt          DateTime?
+  paidAt          DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  lineItems       InvoiceLineItem[]
+  payments        Payment[]
+
+  @@index([organizationId])
+  @@map("invoices")
+}
+
+model InvoiceLineItem {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id])
+  caseId      String
+  case        Case     @relation(fields: [caseId], references: [id])
+  description String
+  unitPrice   Decimal  @db.Decimal(10, 2)
+  quantity    Int      @default(1)
+  amount      Decimal  @db.Decimal(10, 2)
+  createdAt   DateTime @default(now())
+
+  @@map("invoice_line_items")
+}
+
+model Payment {
+  id            String   @id @default(cuid())
+  invoiceId     String
+  invoice       Invoice  @relation(fields: [invoiceId], references: [id])
+  amount        Decimal  @db.Decimal(14, 2)
+  paymentDate   DateTime @db.Date
+  paymentMode   String?  // NEFT, RTGS, CHEQUE, CASH
+  referenceNumber String?
+  notes         String?
+  recordedById  String
+  createdAt     DateTime @default(now())
+
+  @@index([invoiceId])
+  @@map("payments")
+}
+
+// ============================================================
+// PAYROLL
+// ============================================================
+
+model PayrollEntry {
+  id              String   @id @default(cuid())
+  employeeId      String
+  employee        Employee @relation(fields: [employeeId], references: [id])
+  month           Int      // 1-12
+  year            Int
+  basicSalary     Decimal  @db.Decimal(10, 2)
+  hra             Decimal  @db.Decimal(10, 2) @default(0)
+  otherAllowances Decimal  @db.Decimal(10, 2) @default(0)
+  travelReimbursement Decimal @db.Decimal(10, 2) @default(0)
+  bonus           Decimal  @db.Decimal(10, 2) @default(0)
+  grossSalary     Decimal  @db.Decimal(10, 2)
+  pfDeduction     Decimal  @db.Decimal(10, 2) @default(0)
+  esiDeduction    Decimal  @db.Decimal(10, 2) @default(0)
+  tdsDeduction    Decimal  @db.Decimal(10, 2) @default(0)
+  loanDeduction   Decimal  @db.Decimal(10, 2) @default(0)
+  leaveDeduction  Decimal  @db.Decimal(10, 2) @default(0)
+  otherDeductions Decimal  @db.Decimal(10, 2) @default(0)
+  netSalary       Decimal  @db.Decimal(10, 2)
+  workingDays     Int
+  presentDays     Int
+  leaveDays       Int
+  absentDays      Int
+  status          String   @default("DRAFT") // DRAFT, APPROVED, PAID
+  payslipS3Key    String?
+  processedById   String?
+  processedAt     DateTime?
+  paidAt          DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  deductions      PayrollDeduction[]
+
+  @@unique([employeeId, month, year])
+  @@map("payroll_entries")
+}
+
+model PayrollDeduction {
+  id             String       @id @default(cuid())
+  payrollEntryId String
+  payrollEntry   PayrollEntry @relation(fields: [payrollEntryId], references: [id])
+  type           String       // PF, ESI, TDS, LOAN, ADVANCE, OTHER
+  description    String?
+  amount         Decimal      @db.Decimal(10, 2)
+  createdAt      DateTime     @default(now())
+
+  @@map("payroll_deductions")
+}
+
+// ============================================================
+// PROPERTY TRANSACTIONS & ANALYTICS
+// ============================================================
+
+model PropertyTransaction {
+  id               String       @id @default(cuid())
+  caseId           String?
+  address          String
+  city             String
+  locality         String?
+  pincode          String?
+  latitude         Decimal?     @db.Decimal(10, 8)
+  longitude        Decimal?     @db.Decimal(11, 8)
+  propertyType     PropertyType
+  totalArea        Decimal      @db.Decimal(10, 2)
+  areaUnit         String       @default("sqft")
+  valuationAmount  Decimal      @db.Decimal(14, 2)
+  ratePerSqFt      Decimal      @db.Decimal(10, 2)
+  marketRatePerSqFt Decimal?    @db.Decimal(10, 2)
+  organizationId   String?
+  engineerId       String?
+  valuationDate    DateTime     @db.Date
+  createdAt        DateTime     @default(now())
+
+  @@index([city])
+  @@index([pincode])
+  @@index([valuationDate])
+  @@map("property_transactions")
+}
+
+// ============================================================
+// DEMOLITION ALERTS
+// ============================================================
+
+model DemolitionProperty {
+  id              String   @id @default(cuid())
+  authority       String
+  bookingId       String?  @unique  // MCD booking ID
+  noticeDate      DateTime @db.Date
+  noticeNumber    String?           // Booking file number e.g. 138/B/UC/EE(B)-II/CNZ/26
+  address         String
+  city            String
+  zone            String?           // e.g. "South Zone", "Central Zone"
+  locality        String?
+  ownerName       String?           // Property owner / builder name
+  pincode         String?
+  latitude        Decimal? @db.Decimal(10, 8)
+  longitude       Decimal? @db.Decimal(11, 8)
+  reason          String?
+  status          String   @default("ACTIVE") // ACTIVE, EXECUTED, CANCELLED
+  sourceFile      String?
+  uploadedById    String?
+  createdAt       DateTime @default(now())
+
+  alerts          DemolitionAlert[]
+
+  @@index([pincode])
+  @@index([zone])
+  @@index([locality])
+  @@map("demolition_properties")
+}
+
+model DemolitionAlert {
+  id                   String                @id @default(cuid())
+  caseId               String
+  case                 Case                  @relation(fields: [caseId], references: [id])
+  demolitionPropertyId String
+  demolitionProperty   DemolitionProperty    @relation(fields: [demolitionPropertyId], references: [id])
+  matchStatus          DemolitionMatchStatus @default(POTENTIAL)
+  confidenceScore      Int                   // 0-100
+  matchReason          String?               // ADDRESS, PINCODE, GPS, ALL
+  distanceMeters       Decimal?              @db.Decimal(8, 2)
+  dismissedById        String?
+  dismissedAt          DateTime?
+  dismissalReason      String?
+  createdAt            DateTime              @default(now())
+
+  @@unique([caseId, demolitionPropertyId])
+  @@map("demolition_alerts")
+}
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+
+model Notification {
+  id              String              @id @default(cuid())
+  userId          String
+  user            User                @relation(fields: [userId], references: [id])
+  title           String
+  body            String
+  type            String              // CASE_ASSIGNED, REPORT_APPROVED, TAT_BREACH, etc.
+  entityType      String?             // CASE, REPORT, LEAVE, INVOICE
+  entityId        String?
+  channel         NotificationChannel @default(IN_APP)
+  status          NotificationStatus  @default(PENDING)
+  readAt          DateTime?
+  createdAt       DateTime            @default(now())
+
+  logs            NotificationLog[]
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+model NotificationLog {
+  id             String             @id @default(cuid())
+  notificationId String
+  notification   Notification       @relation(fields: [notificationId], references: [id])
+  channel        NotificationChannel
+  sentById       String?
+  sentBy         User?              @relation(fields: [sentById], references: [id])
+  status         NotificationStatus
+  externalId     String?            // Provider message ID
+  error          String?
+  sentAt         DateTime           @default(now())
+
+  @@map("notification_logs")
+}
+
+// ============================================================
+// SYSTEM & SETTINGS
+// ============================================================
+
+model SystemSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  type      String   @default("STRING") // STRING, NUMBER, BOOLEAN, JSON
+  category  String?  // GEOFENCE, BILLING, AI, NOTIFICATIONS, etc.
+  label     String?
+  updatedById String?
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@map("system_settings")
+}
+
+// ============================================================
+// AUDIT TRAIL (Immutable)
+// ============================================================
+
+model AuditLog {
+  id           String      @id @default(cuid())
+  userId       String
+  user         User        @relation(fields: [userId], references: [id])
+  action       AuditAction
+  entityType   String      // CASE, REPORT, USER, EMPLOYEE, etc.
+  entityId     String
+  caseId       String?
+  case         Case?       @relation(fields: [caseId], references: [id])
+  oldValue     Json?
+  newValue     Json?
+  ipAddress    String?
+  userAgent    String?
+  metadata     Json?
+  createdAt    DateTime    @default(now())
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================================
+// MIS SNAPSHOTS (pre-computed for performance)
+// ============================================================
+
+model MisSnapshot {
+  id               String   @id @default(cuid())
+  snapshotDate     DateTime @db.Date
+  organizationId   String?
+  totalCases       Int
+  newCases         Int
+  assignedCases    Int
+  inProgressCases  Int
+  completedCases   Int
+  finalizedCases   Int
+  sentToBankCases  Int
+  onHoldCases      Int
+  avgTatHours      Decimal? @db.Decimal(8, 2)
+  breachedCases    Int
+  revenue          Decimal? @db.Decimal(14, 2)
+  engineerCount    Int
+  createdAt        DateTime @default(now())
+
+  @@unique([snapshotDate, organizationId])
+  @@map("mis_snapshots")
+}
