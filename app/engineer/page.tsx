@@ -1,150 +1,160 @@
 'use client'
 
 import { useUser } from '@clerk/nextjs'
-import { useCases } from '@/lib/api/hooks'
-import { useTodayAttendance } from '@/lib/api/hooks'
-import { Card, CardContent } from '@/components/ui/card'
+import { useCases, useTodayAttendance } from '@/lib/api/hooks'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import Link from 'next/link'
-import { Briefcase, Clock, CheckCircle2, AlertCircle, ChevronRight } from 'lucide-react'
-
-function fmt(d: string | undefined) {
-  if (!d) return '—'
-  return new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
-
-const STATUS_LABEL: Record<string, string> = {
-  ASSIGNED: 'Assigned',
-  SITE_VISIT_SCHEDULED: 'Visit Scheduled',
-  SITE_VISIT_IN_PROGRESS: 'In Progress',
-  SITE_VISIT_COMPLETED: 'Completed',
-  NEW: 'New',
-  REVISION_REQUESTED: 'Revision',
-}
+import { Briefcase, Clock, ChevronRight, MapPin, CheckCircle2, AlertCircle, PlayCircle } from 'lucide-react'
 
 const STATUS_COLOR: Record<string, string> = {
-  ASSIGNED: 'bg-blue-100 text-blue-800',
-  SITE_VISIT_SCHEDULED: 'bg-amber-100 text-amber-800',
-  SITE_VISIT_IN_PROGRESS: 'bg-purple-100 text-purple-800',
-  SITE_VISIT_COMPLETED: 'bg-emerald-100 text-emerald-800',
-  NEW: 'bg-slate-100 text-slate-800',
-  REVISION_REQUESTED: 'bg-red-100 text-red-800',
+  ASSIGNED:              'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
+  SITE_VISIT_SCHEDULED:  'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
+  SITE_VISIT_IN_PROGRESS:'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300',
+  SITE_VISIT_COMPLETED:  'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300',
+  REVISION_REQUESTED:    'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
+  NEW:                   'bg-slate-100 text-slate-700',
+}
+const STATUS_LABEL: Record<string, string> = {
+  ASSIGNED: 'Assigned', SITE_VISIT_SCHEDULED: 'Scheduled',
+  SITE_VISIT_IN_PROGRESS: 'In Progress', SITE_VISIT_COMPLETED: 'Completed',
+  REVISION_REQUESTED: 'Revision', NEW: 'New',
+}
+
+function fmt(t: string) {
+  return new Date(t).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
 }
 
 export default function EngineerHomePage() {
   const { user } = useUser()
-  const { data: todayAttendance, isLoading: loadingAttendance } = useTodayAttendance()
-  const { data: casesData, isLoading: loadingCases } = useCases({ limit: 5 })
+  const { data: attendance, isLoading: loadingAtt } = useTodayAttendance()
+  const { data: casesData, isLoading: loadingCases } = useCases({ limit: 20 })
 
-  const isPunchedIn = todayAttendance?.punchIn && !todayAttendance?.punchOut
-  const cases = casesData?.data ?? []
+  const cases: any[] = casesData?.data ?? []
+  const active = cases.filter((c: any) =>
+    ['ASSIGNED', 'SITE_VISIT_SCHEDULED', 'SITE_VISIT_IN_PROGRESS'].includes((c.status ?? '').toUpperCase()))
+  const done = cases.filter((c: any) => (c.status ?? '').toUpperCase() === 'SITE_VISIT_COMPLETED')
+  const revision = cases.filter((c: any) => (c.status ?? '').toUpperCase() === 'REVISION_REQUESTED')
 
+  const isPunchedIn = attendance?.punchIn && !attendance?.punchOut
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 
   return (
-    <div className="p-4 space-y-5">
+    <div className="min-h-screen bg-background">
       {/* Header */}
-      <div className="pt-2">
-        <p className="text-sm text-muted-foreground">{greeting},</p>
-        <h1 className="text-2xl font-bold">{user?.firstName ?? 'Engineer'}</h1>
-        <p className="text-xs text-muted-foreground mt-0.5">{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+      <div className="bg-gradient-to-br from-blue-600 to-blue-800 text-white px-5 pt-12 pb-8">
+        <p className="text-blue-200 text-sm">{greeting} 👋</p>
+        <h1 className="text-2xl font-bold mt-1">{user?.firstName ?? 'Engineer'}</h1>
+        <p className="text-blue-200 text-xs mt-1">
+          {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+        </p>
+
+        {/* Punch status inline */}
+        <Link href="/engineer/punch-in-out">
+          <div className="mt-4 flex items-center justify-between bg-white/10 backdrop-blur rounded-2xl px-4 py-3">
+            <div className="flex items-center gap-3">
+              <div className={`w-2.5 h-2.5 rounded-full ${isPunchedIn ? 'bg-emerald-400 animate-pulse' : 'bg-white/40'}`} />
+              <div>
+                <p className="text-sm font-semibold">
+                  {loadingAtt ? '...' : isPunchedIn ? 'Punched In' : 'Not Punched In'}
+                </p>
+                {isPunchedIn && attendance?.punchIn && (
+                  <p className="text-xs text-blue-200">Since {fmt(attendance.punchIn)}</p>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-blue-200">{isPunchedIn ? 'Tap to punch out' : 'Tap to punch in'}</span>
+              <ChevronRight className="w-4 h-4 text-blue-200" />
+            </div>
+          </div>
+        </Link>
       </div>
 
-      {/* Punch status card */}
-      <Link href="/engineer/punch-in-out">
-        {loadingAttendance ? (
-          <Skeleton className="h-20 w-full rounded-xl" />
-        ) : (
-          <Card className={isPunchedIn ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20' : 'border-slate-200'}>
-            <CardContent className="pt-4 pb-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-full ${isPunchedIn ? 'bg-emerald-200 dark:bg-emerald-800' : 'bg-slate-100 dark:bg-slate-800'}`}>
-                  <Clock className={`h-5 w-5 ${isPunchedIn ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-500'}`} />
-                </div>
-                <div>
-                  <p className="font-semibold text-sm">{isPunchedIn ? 'You are punched in' : 'Not yet punched in'}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {isPunchedIn
-                      ? `Since ${fmt(todayAttendance?.punchIn)}`
-                      : 'Tap to punch in'}
-                  </p>
-                </div>
-              </div>
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
-            </CardContent>
-          </Card>
-        )}
-      </Link>
-
-      {/* Quick stats row */}
-      <div className="grid grid-cols-3 gap-3">
-        <Card>
-          <CardContent className="pt-3 pb-3 text-center">
-            <p className="text-2xl font-bold text-blue-600">{loadingCases ? '—' : cases.filter((c: any) => ['ASSIGNED','SITE_VISIT_SCHEDULED','SITE_VISIT_IN_PROGRESS'].includes((c.status ?? '').toUpperCase())).length}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Active</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-3 pb-3 text-center">
-            <p className="text-2xl font-bold text-emerald-600">{loadingCases ? '—' : cases.filter((c: any) => (c.status ?? '').toUpperCase() === 'SITE_VISIT_COMPLETED').length}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Done</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-3 pb-3 text-center">
-            <p className="text-2xl font-bold text-amber-600">{loadingCases ? '—' : cases.filter((c: any) => (c.status ?? '').toUpperCase() === 'REVISION_REQUESTED').length}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Revision</p>
-          </CardContent>
-        </Card>
+      {/* Stat pills */}
+      <div className="px-5 -mt-4">
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: 'Active', count: loadingCases ? null : active.length, color: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-700 dark:text-blue-300', icon: PlayCircle },
+            { label: 'Done', count: loadingCases ? null : done.length, color: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-300', icon: CheckCircle2 },
+            { label: 'Revision', count: loadingCases ? null : revision.length, color: 'bg-red-50 dark:bg-red-950/30', text: 'text-red-700 dark:text-red-300', icon: AlertCircle },
+          ].map(({ label, count, color, text, icon: Icon }) => (
+            <div key={label} className={`${color} rounded-2xl p-3 flex flex-col items-center gap-1`}>
+              <Icon className={`w-4 h-4 ${text}`} />
+              <p className={`text-2xl font-bold ${text}`}>{count ?? '—'}</p>
+              <p className={`text-[11px] font-medium ${text} opacity-80`}>{label}</p>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Today's cases */}
-      <div>
+      <div className="px-5 mt-6">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="font-semibold text-sm">My Cases</h2>
-          <Link href="/engineer/cases" className="text-xs text-primary font-medium">See all →</Link>
+          <h2 className="font-semibold text-base">My Cases</h2>
+          <Link href="/engineer/cases" className="text-sm text-blue-600 dark:text-blue-400 font-medium">
+            View all →
+          </Link>
         </div>
 
         {loadingCases ? (
-          <div className="space-y-2">
-            {[1, 2, 3].map(i => <Skeleton key={i} className="h-20 w-full rounded-lg" />)}
+          <div className="space-y-3">
+            {[1,2,3].map(i => <Skeleton key={i} className="h-24 w-full rounded-2xl" />)}
           </div>
         ) : cases.length === 0 ? (
-          <Card>
-            <CardContent className="pt-8 pb-8 flex flex-col items-center gap-2 text-center">
-              <CheckCircle2 className="h-8 w-8 text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">No cases assigned yet</p>
-            </CardContent>
-          </Card>
+          <div className="flex flex-col items-center py-16 gap-3 text-center">
+            <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+              <Briefcase className="w-7 h-7 text-muted-foreground" />
+            </div>
+            <p className="font-medium">No cases assigned yet</p>
+            <p className="text-sm text-muted-foreground">Your coordinator will assign cases here</p>
+          </div>
         ) : (
-          <div className="space-y-2">
-            {cases.slice(0, 4).map((c: any) => {
+          <div className="space-y-3">
+            {active.concat(revision).slice(0, 6).map((c: any) => {
               const status = (c.status ?? '').toUpperCase()
               return (
                 <Link key={c.id} href={`/engineer/cases/${c.id}`}>
-                  <Card className="hover:border-primary/50 transition-colors">
-                    <CardContent className="pt-3 pb-3 flex items-start justify-between gap-2">
-                      <div className="flex items-start gap-3 min-w-0">
-                        <Briefcase className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium truncate">{c.referenceNumber ?? c.id.slice(0, 8).toUpperCase()}</p>
-                          <p className="text-xs text-muted-foreground truncate mt-0.5">{c.propertyAddress ?? c.address ?? 'No address'}</p>
-                          <p className="text-xs text-muted-foreground">{c.bankName ?? c.bank}</p>
+                  <div className="bg-card border border-border rounded-2xl p-4 active:scale-[0.98] transition-transform">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-bold text-muted-foreground">
+                            {c.referenceNumber ?? c.caseNumber ?? c.id.slice(0,8).toUpperCase()}
+                          </span>
+                          <Badge className={`text-[10px] px-2 py-0 ${STATUS_COLOR[status] ?? 'bg-slate-100 text-slate-700'}`}>
+                            {STATUS_LABEL[status] ?? status}
+                          </Badge>
+                        </div>
+                        <p className="text-sm font-semibold line-clamp-1">
+                          {c.ownerName ?? 'Unknown Owner'}
+                        </p>
+                        <div className="flex items-center gap-1 mt-1">
+                          <MapPin className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                          <p className="text-xs text-muted-foreground line-clamp-1">
+                            {c.propertyAddress ?? c.address ?? 'No address'}
+                          </p>
                         </div>
                       </div>
-                      <Badge className={`text-[10px] shrink-0 ${STATUS_COLOR[status] ?? 'bg-slate-100 text-slate-800'}`}>
-                        {STATUS_LABEL[status] ?? status}
-                      </Badge>
-                    </CardContent>
-                  </Card>
+                      <ChevronRight className="w-5 h-5 text-muted-foreground flex-shrink-0 mt-0.5" />
+                    </div>
+                    {c.siteVisitDate && (
+                      <div className="mt-2 pt-2 border-t border-border/50 flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-muted-foreground" />
+                        <p className="text-[11px] text-muted-foreground">
+                          Visit: {new Date(c.siteVisitDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 </Link>
               )
             })}
           </div>
         )}
       </div>
+      <div className="h-6" />
     </div>
   )
 }

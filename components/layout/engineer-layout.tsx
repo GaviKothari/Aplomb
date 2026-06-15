@@ -6,26 +6,26 @@ import { Home, Briefcase, MapPin, Clock, User } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const NAV = [
-  { href: '/engineer',                    label: 'Home',   icon: Home },
-  { href: '/engineer/cases',              label: 'Cases',  icon: Briefcase },
-  { href: '/engineer/travel-expenses',    label: 'Travel', icon: MapPin },
-  { href: '/engineer/punch-in-out',       label: 'Punch',  icon: Clock },
-  { href: '/engineer/profile',            label: 'Profile',icon: User },
+  { href: '/engineer',                 label: 'Home',    icon: Home },
+  { href: '/engineer/cases',           label: 'Cases',   icon: Briefcase },
+  { href: '/engineer/travel-expenses', label: 'Travel',  icon: MapPin },
+  { href: '/engineer/punch-in-out',    label: 'Punch',   icon: Clock },
+  { href: '/engineer/profile',         label: 'Profile', icon: User },
 ]
 
 export function EngineerLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
   return (
-    <div className="flex flex-col min-h-screen bg-background max-w-md mx-auto relative">
-      {/* Main scrollable content — padding-bottom leaves room for bottom nav */}
-      <main className="flex-1 overflow-y-auto pb-20">
+    <div className="flex flex-col min-h-screen bg-background">
+      <main className="flex-1 overflow-y-auto pb-24">
         {children}
       </main>
 
-      {/* Bottom navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto border-t border-border bg-background/95 backdrop-blur-sm z-50">
-        <div className="flex">
+      {/* Bottom navigation bar */}
+      <nav className="fixed bottom-0 inset-x-0 z-50 bg-background/95 backdrop-blur-md border-t border-border">
+        {/* Safe area for iPhone home indicator */}
+        <div className="flex items-center pb-safe">
           {NAV.map(({ href, label, icon: Icon }) => {
             const active = href === '/engineer'
               ? pathname === '/engineer'
@@ -35,14 +35,19 @@ export function EngineerLayout({ children }: { children: React.ReactNode }) {
                 key={href}
                 href={href}
                 className={cn(
-                  'flex-1 flex flex-col items-center gap-1 py-3 text-[10px] font-medium transition-colors',
-                  active
-                    ? 'text-primary'
-                    : 'text-muted-foreground hover:text-foreground'
+                  'flex-1 flex flex-col items-center justify-center gap-1 py-3 min-h-[64px] transition-colors',
+                  active ? 'text-blue-600 dark:text-blue-400' : 'text-muted-foreground'
                 )}
               >
-                <Icon className={cn('h-5 w-5', active && 'stroke-[2.5]')} />
-                {label}
+                <div className={cn(
+                  'flex items-center justify-center w-10 h-6 rounded-full transition-all',
+                  active && 'bg-blue-100 dark:bg-blue-900/40'
+                )}>
+                  <Icon className={cn('h-5 w-5', active && 'stroke-[2.5]')} />
+                </div>
+                <span className={cn('text-[10px] font-medium', active && 'font-semibold')}>
+                  {label}
+                </span>
               </Link>
             )
           })}

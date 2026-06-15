@@ -15,6 +15,7 @@ const ROUTE_ROLES: [string, string[]][] = [
   ['/hr-team',                 ['admin', 'hr']],
   ['/analytics',               ['admin', 'coordinator']],
   ['/system',                  ['admin']],
+  ['/dashboard',               ['admin', 'coordinator', 'verifier', 'hr', 'accounts']],
   ['/operations/case-board',   ['admin', 'coordinator']],
   ['/operations/cases/new',    ['admin', 'coordinator']],
   ['/operations/verification', ['admin', 'verifier']],
