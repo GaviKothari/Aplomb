@@ -76,14 +76,14 @@ export default function EmployeesPage() {
     <AppLayout>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Employees</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Employees</h1>
             <p className="text-muted-foreground mt-1 text-sm">
               Manage your team members, roles and documents
             </p>
           </div>
-          <Button className="gap-2" onClick={() => setAddOpen(true)}>
+          <Button className="gap-2 self-start sm:self-auto" onClick={() => setAddOpen(true)}>
             <Plus className="w-4 h-4" />
             Add Employee
           </Button>

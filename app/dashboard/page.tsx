@@ -9,6 +9,8 @@ import { CoordinatorDashboard } from '@/components/dashboards/coordinator-dashbo
 import { HRDashboard } from '@/components/dashboards/hr-dashboard'
 import { AccountsDashboard } from '@/components/dashboards/accounts-dashboard'
 import { useRole } from '@/hooks/useRole'
+import { useRouter } from 'next/navigation'
+import { useEffect } from 'react'
 import { StatCard } from '@/components/dashboard/stat-card'
 import { useVerificationQueue } from '@/lib/api/hooks'
 import { Badge } from '@/components/ui/badge'
@@ -97,10 +99,17 @@ function VerifierDashboard() {
 
 export default function DashboardPage() {
   const { role } = useRole()
+  const router = useRouter()
+
+  // Engineers have their own mobile app
+  useEffect(() => {
+    if (role === 'engineer') router.replace('/engineer')
+  }, [role, router])
+
+  if (role === 'engineer') return null
 
   const dashboards: Record<string, React.ReactNode> = {
     admin: <AdminDashboard />,
-    engineer: <EngineerDashboard />,
     verifier: <VerifierDashboard />,
     coordinator: <CoordinatorDashboard />,
     hr: <HRDashboard />,

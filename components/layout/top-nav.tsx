@@ -29,10 +29,10 @@ export function TopNav() {
 
   return (
     <div className="sticky top-0 z-30 border-b border-border/50 bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/60">
-      <div className="flex items-center justify-between gap-4 px-6 py-3">
-        {/* Search */}
-        <div className="flex-1 max-w-md">
-          <div className="relative group">
+      <div className="flex items-center justify-between gap-2 pl-14 pr-4 md:px-6 py-3">
+        {/* Search — hidden on mobile to save space */}
+        <div className="hidden sm:flex flex-1 max-w-md">
+          <div className="relative group w-full">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground group-hover:text-foreground/60 transition-colors" />
             <Input
               placeholder="Search cases, employees..."
@@ -41,10 +41,13 @@ export function TopNav() {
           </div>
         </div>
 
+        {/* Mobile: push right-side controls to the right */}
+        <div className="flex-1 sm:hidden" />
+
         {/* Right side controls */}
-        <div className="flex items-center gap-4">
-          <RoleSwitcher />
-          <UserRoleBadge />
+        <div className="flex items-center gap-1 md:gap-4">
+          <div className="hidden md:block"><RoleSwitcher /></div>
+          <div className="hidden sm:block"><UserRoleBadge /></div>
 
           {/* Theme toggle */}
           <Button

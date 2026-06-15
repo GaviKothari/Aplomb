@@ -12,7 +12,7 @@ import { useRole } from '@/hooks/useRole'
 export function Sidebar() {
   const pathname = usePathname()
   const { role } = useRole()
-  const [isOpen, setIsOpen] = useState(true)
+  const [isOpen, setIsOpen] = useState(false)
   const [expandedItems, setExpandedItems] = useState<string[]>([])
 
   const toggleExpanded = (href: string) => {
