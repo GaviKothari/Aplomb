@@ -19,11 +19,20 @@ async function bootstrap() {
 
   // CORS — allow frontend origin
   app.enableCors({
-    origin: [
-      process.env.FRONTEND_URL || 'http://localhost:3000',
-      'https://aplomb.in',
-      'https://app.aplomb.in',
-    ],
+    origin: (origin, callback) => {
+      const allowed = [
+        process.env.FRONTEND_URL,
+        'http://localhost:3000',
+        'https://aplomb.in',
+        'https://app.aplomb.in',
+      ].filter(Boolean);
+      // Allow any vercel.app preview URL + configured origins
+      if (!origin || allowed.includes(origin) || origin.endsWith('.vercel.app')) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS: ${origin} not allowed`));
+      }
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
