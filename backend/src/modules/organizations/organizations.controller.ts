@@ -38,6 +38,12 @@ export class OrganizationsController {
     return this.service.update(id, dto);
   }
 
+  @Get(':id/branches')
+  @ApiOperation({ summary: 'List branches and contacts for an organization' })
+  getBranches(@Param('id') id: string) {
+    return this.service.getBranches(id);
+  }
+
   @Post(':id/rate-cards')
   @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Set rate for property type' })

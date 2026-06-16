@@ -55,6 +55,14 @@ export class OrganizationsService {
     return this.prisma.organization.update({ where: { id }, data: dto });
   }
 
+  async getBranches(orgId: string) {
+    return this.prisma.bankBranch.findMany({
+      where: { organizationId: orgId, isActive: true },
+      orderBy: [{ branchName: 'asc' }, { contactName: 'asc' }],
+      select: { id: true, branchName: true, contactName: true, contactPhone: true },
+    });
+  }
+
   async upsertRateCard(orgId: string, propertyType: string, rateAmount: number) {
     return this.prisma.rateCard.upsert({
       where: {
