@@ -165,13 +165,16 @@ export class ReportTemplatesService {
     // Build styled HTML from the filled workbook
     const html = await this.workbookToHtml(workbook, data);
 
-    // Puppeteer PDF — use system Chromium in production (set via PUPPETEER_EXECUTABLE_PATH)
-    const puppeteer = await import('puppeteer');
-    const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
-    const browser = await puppeteer.default.launch({
-      headless: true,
-      executablePath,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+    // Use @sparticuz/chromium + puppeteer-core; variable names bypass tsc static module resolution
+    const chromiumPkg = '@sparticuz/chromium';
+    const puppeteerPkg = 'puppeteer-core';
+    const chromium: any = await import(chromiumPkg).then((m: any) => m.default ?? m);
+    const puppeteer: any = await import(puppeteerPkg).then((m: any) => m.default ?? m);
+    const browser = await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
     });
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0' });

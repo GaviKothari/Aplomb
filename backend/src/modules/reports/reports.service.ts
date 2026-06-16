@@ -140,12 +140,15 @@ export class ReportsService {
   async generatePdf(reportId: string): Promise<string> {
     const report = await this.findOne(reportId);
 
-    const puppeteer = await import('puppeteer');
-    const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
-    const browser = await puppeteer.default.launch({
-      headless: true,
-      executablePath,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+    const chromiumPkg = '@sparticuz/chromium';
+    const puppeteerPkg = 'puppeteer-core';
+    const chromium: any = await import(chromiumPkg).then((m: any) => m.default ?? m);
+    const puppeteer: any = await import(puppeteerPkg).then((m: any) => m.default ?? m);
+    const browser = await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
     });
 
     const page = await browser.newPage();
