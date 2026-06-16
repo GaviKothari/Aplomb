@@ -11,7 +11,9 @@ export class OrganizationsService {
   }
 
   async findAll(query: { search?: string; type?: string; page?: number; limit?: number }) {
-    const { search, type, page = 1, limit = 20 } = query;
+    const { search, type } = query;
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 20;
     const skip = (page - 1) * limit;
 
     const where: any = { isActive: true };
