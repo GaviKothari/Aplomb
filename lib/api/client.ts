@@ -100,6 +100,7 @@ export function createApiClient(getToken: () => Promise<string | null>) {
       list: (p?: any) => api<any>('/organizations', { params: p }),
       get: (id: string) => api<any>(`/organizations/${id}`),
       create: (body: any) => api<any>('/organizations', { method: 'POST', body }),
+      branches: (id: string) => api<any>(`/organizations/${id}/branches`),
     },
 
     // AI Reporting

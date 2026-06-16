@@ -35,32 +35,83 @@ import {
 import {
   useCreateCase,
   useOrganizations,
+  useBankBranches,
   useEmployees,
   useMatchDemolitionCase,
   useApi,
 } from '@/lib/api/hooks'
 
 const PROPERTY_TYPES = [
-  { value: 'RESIDENTIAL_APARTMENT', label: 'Residential Apartment' },
-  { value: 'RESIDENTIAL_INDEPENDENT', label: 'Independent House' },
-  { value: 'RESIDENTIAL_VILLA', label: 'Villa' },
-  { value: 'RESIDENTIAL_PLOT', label: 'Residential Plot' },
-  { value: 'COMMERCIAL_OFFICE', label: 'Commercial Office' },
-  { value: 'COMMERCIAL_RETAIL', label: 'Retail Shop' },
-  { value: 'COMMERCIAL_WAREHOUSE', label: 'Warehouse' },
-  { value: 'INDUSTRIAL', label: 'Industrial' },
-  { value: 'AGRICULTURAL', label: 'Agricultural Land' },
-  { value: 'MIXED_USE', label: 'Mixed Use' },
+  'APF PROJECT',
+  'Affordable Flat',
+  'Authority Flat',
+  'Builder Flat',
+  'Builder Floor',
+  'Bungalow',
+  'Commercial Building',
+  'Commercial Floor',
+  'Commercial Property',
+  'Commercial Shop',
+  'Commercial Space',
+  'DDA Flat',
+  'DDA LIG Flat',
+  'DDA MIG Flat',
+  'DDA SFS Flat',
+  'Developer Flat',
+  'Developer Floor',
+  'Developer Villa',
+  'Duplex Flat',
+  'Duplex House',
+  'EWS Flat',
+  'Flat',
+  'GDA Flat',
+  'Hospital',
+  'Hotel',
+  'Independent Commercial Property',
+  'Independent House',
+  'Individual Floor',
+  'Individual House',
+  'Industrial Building',
+  'Janta Flat',
+  'LIG Flat',
+  'MIG Flat',
+  'Mixed Use',
+  'Office Space',
+  'Pent House',
+  'Proposed Building',
+  'Resort',
+  'Row House',
+  'SCO Plot',
+  'School Property',
+  'Service Apartment',
+  'Shop',
+  'Society Flat',
+  'Society Floor',
+  'Under Construction',
+  'Vacant Land',
+  'Vacant Plot',
+  'Villa',
+  'Warehouse',
 ]
 
 const CASE_TYPES = [
-  'Home Loan Valuation',
-  'Mortgage Valuation',
-  'Loan Against Property',
-  'Resale Valuation',
-  'Insurance Valuation',
-  'Legal/Court Valuation',
+  'Home Loan',
+  'LAP',
+  'BT',
+  'BT + Top up',
+  'Purchase',
+  'Resale',
+  'APF',
+  'APF Subsequent',
+  'Self Construction',
+  'Plot + Construction',
+  'Top up',
+  'Desktop Valuation',
   'Rental Valuation',
+  'Audit',
+  'Commercial Loan',
+  'Land Loan',
+  'Education Loan',
   'Other',
 ]
 
@@ -301,6 +352,11 @@ export default function AddNewCasePage() {
   const { data: orgsData } = useOrganizations({ limit: 200 })
   const organizations: any[] = orgsData?.data ?? orgsData ?? []
 
+  const { data: branchesData } = useBankBranches(form.organizationId || undefined)
+  const branches: any[] = branchesData ?? []
+  const uniqueBranches = [...new Map(branches.map(b => [b.branchName, b])).values()]
+  const contactsForBranch = branches.filter(b => b.branchName === form.branchName)
+
   const { data: engineersData } = useEmployees({ limit: 100 })
   const employees: any[] = engineersData?.data ?? engineersData ?? []
 
@@ -448,7 +504,7 @@ export default function AddNewCasePage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="sm:col-span-2">
                     <Label>Bank / Organization *</Label>
-                    <Select value={form.organizationId} onValueChange={v => setField('organizationId', v)}>
+                    <Select value={form.organizationId} onValueChange={v => setForm(p => ({ ...p, organizationId: v, branchName: '', bankContactName: '' }))}>
                       <SelectTrigger>
                         <SelectValue placeholder="Select bank or organization" />
                       </SelectTrigger>
@@ -502,12 +558,46 @@ export default function AddNewCasePage() {
 
                   <div>
                     <Label>Branch Name</Label>
-                    <Input placeholder="e.g. Nehru Place Branch" value={form.branchName} onChange={set('branchName')} />
+                    {uniqueBranches.length > 0 ? (
+                      <Select
+                        value={form.branchName}
+                        onValueChange={v => setForm(p => ({ ...p, branchName: v, bankContactName: '' }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select branch" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {uniqueBranches.map(b => (
+                            <SelectItem key={b.id} value={b.branchName}>{b.branchName}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input placeholder="e.g. Nehru Place Branch" value={form.branchName} onChange={set('branchName')} />
+                    )}
                   </div>
 
                   <div>
                     <Label>Bank Contact Person</Label>
-                    <Input placeholder="Name of bank officer" value={form.bankContactName} onChange={set('bankContactName')} />
+                    {contactsForBranch.length > 0 ? (
+                      <Select
+                        value={form.bankContactName}
+                        onValueChange={v => setField('bankContactName', v)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select contact person" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {contactsForBranch
+                            .filter(b => b.contactName)
+                            .map(b => (
+                              <SelectItem key={b.id} value={b.contactName}>{b.contactName}</SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input placeholder="Name of bank officer" value={form.bankContactName} onChange={set('bankContactName')} />
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -590,7 +680,7 @@ export default function AddNewCasePage() {
                       </SelectTrigger>
                       <SelectContent>
                         {PROPERTY_TYPES.map(p => (
-                          <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                          <SelectItem key={p} value={p}>{p}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>

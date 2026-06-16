@@ -111,6 +111,16 @@ export function useOrganizations(params?: { search?: string; limit?: number }) {
   });
 }
 
+export function useBankBranches(organizationId: string | undefined) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ['bank-branches', organizationId],
+    queryFn: () => api.organizations.branches(organizationId!),
+    enabled: !!organizationId,
+    staleTime: 300_000,
+  });
+}
+
 // ── AI Reporting ──────────────────────────────────────────────
 export function useStartAiSession() {
   const api = useApi();
