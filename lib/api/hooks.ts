@@ -104,11 +104,27 @@ export function useNearbyCases(lat?: number, lng?: number) {
 // ── Organizations ─────────────────────────────────────────────
 export function useOrganizations(params?: { search?: string; limit?: number }) {
   const api = useApi();
-  return useQuery({
-    queryKey: ['organizations', params],
-    queryFn: () => api.organizations.list(params),
+  // Fetch page 1 and page 2 in parallel to get up to 40 orgs without passing
+  // a string limit (which causes a Prisma validation error on the backend).
+  const q1 = useQuery({
+    queryKey: ['organizations', 'p1', params?.search],
+    queryFn: () => api.organizations.list({ search: params?.search, page: 1 }),
     staleTime: 300_000,
   });
+  const q2 = useQuery({
+    queryKey: ['organizations', 'p2', params?.search],
+    queryFn: () => api.organizations.list({ search: params?.search, page: 2 }),
+    staleTime: 300_000,
+    enabled: (q1.data?.total ?? 0) > 20,
+  });
+  const page1: any[] = q1.data?.data ?? [];
+  const page2: any[] = q2.data?.data ?? [];
+  const merged = [...page1, ...page2];
+  return {
+    data: { data: merged, total: q1.data?.total ?? 0 },
+    isLoading: q1.isLoading,
+    error: q1.error,
+  };
 }
 
 export function useBankBranches(organizationId: string | undefined) {
