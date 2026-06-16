@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Patch, Body, Param, Query,
-  UseInterceptors, UploadedFiles, ParseFilePipe, MaxFileSizeValidator,
+  UseInterceptors, UploadedFiles,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes } from '@nestjs/swagger';
@@ -100,5 +100,34 @@ export class CasesController {
     @CurrentUser() user: User,
   ) {
     return this.service.endSiteVisit(id, body.lat, body.lng, user.id);
+  }
+
+  @Post(':id/field-data')
+  @Roles(UserRole.ENGINEER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Save engineer field observations (creates/updates draft report)' })
+  submitFieldData(
+    @Param('id') id: string,
+    @Body() body: Record<string, any>,
+    @CurrentUser() user: User,
+  ) {
+    return this.service.submitFieldData(id, body, user.id);
+  }
+
+  @Post(':id/photos')
+  @Roles(UserRole.ENGINEER, UserRole.ADMIN)
+  @UseInterceptors(FilesInterceptor('photos', 20, { limits: { fileSize: 10 * 1024 * 1024 } }))
+  @ApiOperation({ summary: 'Upload site visit photos' })
+  uploadPhotos(
+    @Param('id') id: string,
+    @UploadedFiles() files: Express.Multer.File[],
+    @CurrentUser() user: User,
+  ) {
+    return this.service.uploadPhotos(id, files ?? [], user.id);
+  }
+
+  @Get(':id/report')
+  @ApiOperation({ summary: 'Get the draft/latest report for a case' })
+  getCaseReport(@Param('id') id: string) {
+    return this.service.getCaseReport(id);
   }
 }

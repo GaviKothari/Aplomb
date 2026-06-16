@@ -101,6 +101,83 @@ export function useNearbyCases(lat?: number, lng?: number) {
   });
 }
 
+export function useSubmitFieldData() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string; [k: string]: any }) =>
+      api.cases.submitFieldData(id, body),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['case', vars.id] });
+      qc.invalidateQueries({ queryKey: ['case-report', vars.id] });
+      toast.success('Field data saved');
+    },
+    onError: (e: any) => toast.error(e.message ?? 'Failed to save field data'),
+  });
+}
+
+export function useUploadCasePhotos() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, files }: { id: string; files: File[] }) => {
+      const fd = new FormData();
+      files.forEach(f => fd.append('photos', f));
+      return api.cases.uploadPhotos(id, fd);
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['case', vars.id] });
+      toast.success('Photos uploaded');
+    },
+    onError: (e: any) => toast.error(e.message ?? 'Photo upload failed'),
+  });
+}
+
+export function useCaseReport(caseId: string) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ['case-report', caseId],
+    queryFn: () => api.cases.getReport(caseId),
+    enabled: !!caseId,
+    staleTime: 30_000,
+  });
+}
+
+export function useGenerateReportPdf() {
+  const api = useApi();
+  return useMutation({
+    mutationFn: (reportId: string) => api.cases.generatePdf(reportId),
+    onSuccess: () => toast.success('PDF report generated'),
+    onError: (e: any) => toast.error(e.message ?? 'PDF generation failed'),
+  });
+}
+
+// Generates PDF using the bank-specific Excel template matched to the case
+export function useGenerateTemplatePdf() {
+  const { getToken } = useAuth();
+  return useMutation({
+    mutationFn: async (caseId: string) => {
+      const token = await getToken();
+      const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const resp = await fetch(`${base}/report-templates/generate/${caseId}`, {
+        method: 'POST', headers,
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error((err as any).message ?? `PDF generation failed (${resp.status})`);
+      }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      return url;
+    },
+    onSuccess: () => toast.success('PDF opened in new tab'),
+    onError: (e: any) => toast.error(e.message ?? 'PDF generation failed'),
+  });
+}
+
 // ── Organizations ─────────────────────────────────────────────
 export function useOrganizations(params?: { search?: string; limit?: number }) {
   const api = useApi();
@@ -187,6 +264,21 @@ export function useSubmitReport() {
       toast.success('Report submitted for verification');
     },
     onError: (e: any) => toast.error(e.message),
+  });
+}
+
+export function useUpdateReport() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, fields }: { id: string; fields: Record<string, any> }) =>
+      api.reports.update(id, fields),
+    onSuccess: (_, { id }) => {
+      qc.invalidateQueries({ queryKey: ['case-report'] });
+      qc.invalidateQueries({ queryKey: ['report', id] });
+      toast.success('Report updated');
+    },
+    onError: (e: any) => toast.error(e.message ?? 'Failed to update report'),
   });
 }
 

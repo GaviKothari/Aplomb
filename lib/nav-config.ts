@@ -11,6 +11,7 @@ import {
   MapPin,
   MessageSquare,
   Zap,
+  LayoutTemplate,
   type LucideIcon,
 } from 'lucide-react'
 import { UserRole } from '@/types'
@@ -164,6 +165,12 @@ export const navConfig: NavSection[] = [
   {
     title: 'System',
     items: [
+      {
+        title: 'Report Templates',
+        href: '/system/report-templates',
+        icon: LayoutTemplate,
+        visibleFor: ['admin'],
+      },
       {
         title: 'Settings',
         href: '/system/settings',

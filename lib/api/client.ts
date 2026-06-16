@@ -93,6 +93,12 @@ export function createApiClient(getToken: () => Promise<string | null>) {
         api<any>(`/cases/${id}/site-visit/start`, { method: 'POST', body: { lat, lng } }),
       endSiteVisit: (id: string, lat: number, lng: number) =>
         api<any>(`/cases/${id}/site-visit/end`, { method: 'POST', body: { lat, lng } }),
+      submitFieldData: (id: string, body: any) =>
+        api<any>(`/cases/${id}/field-data`, { method: 'POST', body }),
+      uploadPhotos: (id: string, formData: FormData) =>
+        api<any>(`/cases/${id}/photos`, { method: 'POST', body: formData, isFormData: true }),
+      getReport: (id: string) => api<any>(`/cases/${id}/report`),
+      generatePdf: (reportId: string) => api<any>(`/reports/${reportId}/pdf`, { method: 'POST' }),
     },
 
     // Organizations (banks)
@@ -121,6 +127,18 @@ export function createApiClient(getToken: () => Promise<string | null>) {
       update: (id: string, body: any) => api<any>(`/reports/${id}`, { method: 'PATCH', body }),
       submit: (id: string) => api<any>(`/reports/${id}/submit`, { method: 'POST' }),
       versions: (caseId: string) => api<any>(`/reports/case/${caseId}/versions`),
+    },
+
+    // Report Templates (bank + property-type specific Excel → PDF)
+    reportTemplates: {
+      list:          (p?: any) => api<any>('/report-templates', { params: p }),
+      placeholders:  () => api<any>('/report-templates/placeholders'),
+      create:        (body: any) => api<any>('/report-templates', { method: 'POST', body }),
+      upload:        (id: string, formData: FormData) =>
+        api<any>(`/report-templates/${id}/upload`, { method: 'POST', body: formData, isFormData: true }),
+      findForCase:   (caseId: string) => api<any>(`/report-templates/for-case/${caseId}`),
+      generatePdf:   (caseId: string) => api<any>(`/report-templates/generate/${caseId}`, { method: 'POST' }),
+      delete:        (id: string) => api<any>(`/report-templates/${id}`, { method: 'DELETE' }),
     },
 
     // Verification

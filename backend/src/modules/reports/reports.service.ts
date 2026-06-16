@@ -109,10 +109,13 @@ export class ReportsService {
   async update(id: string, fields: Record<string, any>) {
     const updates: any = {};
     const allowedFields = [
-      'propertyDescription', 'totalFloors', 'totalArea', 'builtUpArea', 'carpetArea',
-      'plotArea', 'ageOfConstruction', 'roadWidth', 'siteObservations', 'boundaryDescription',
-      'nearbyLandmarks', 'landRatePerSqFt', 'buildingRatePerSqFt', 'totalMarketValue',
-      'distressValue', 'amenities', 'localityFeatures', 'marketabilityRating', 'liquidityRating',
+      'propertyDescription', 'propertyType', 'constructionStage', 'facingDirection',
+      'totalFloors', 'occupiedFloors', 'totalArea', 'builtUpArea', 'builtUpAreaApproved',
+      'carpetArea', 'plotArea', 'ageOfConstruction', 'roadWidth',
+      'siteObservations', 'boundaryDescription', 'nearbyLandmarks',
+      'landRatePerSqFt', 'buildingRatePerSqFt', 'totalMarketValue',
+      'distressValue', 'insuranceValue', 'officeRemarks',
+      'amenities', 'localityFeatures', 'marketabilityRating', 'liquidityRating',
     ];
 
     for (const key of allowedFields) {
@@ -137,11 +140,12 @@ export class ReportsService {
   async generatePdf(reportId: string): Promise<string> {
     const report = await this.findOne(reportId);
 
-    // Dynamic import Puppeteer to keep startup fast
     const puppeteer = await import('puppeteer');
+    const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
     const browser = await puppeteer.default.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      executablePath,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
     });
 
     const page = await browser.newPage();

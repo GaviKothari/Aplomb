@@ -76,6 +76,19 @@ const ABBREV_REPLACEMENTS: Array<[RegExp, string]> = [
   [/\bKH\.?\s*NO\.?\s*/gi,       'KHASRA '],
   [/\bSH\.?\s*NO\.?\s*/gi,       'SHOP '],
   [/\bF\.?\s*NO\.?\s*/gi,        'FLAT '],
+  // Full-word "X No." forms that abbreviation rules don't catch
+  [/\bPLOT\s+NO\.?\s*/gi,        'PLOT '],     // "Plot No. 57" → "PLOT 57"
+  [/\bKHASRA\s+NO\.?\s*/gi,      'KHASRA '],   // "Khasra No. 812"
+  [/\bSURVEY\s+NO\.?\s*/gi,      'SURVEY '],   // "Survey No. 45"
+  [/\bHOUSE\s+NO\.?\s*/gi,       'HNO '],      // "House No. 234"
+  [/\bSHOP\s+NO\.?\s*/gi,        'SHOP '],     // "Shop No. 5"
+  [/\bFLAT\s+NO\.?\s*/gi,        'FLAT '],     // "Flat No. 7"
+  [/\bGATA\s+NO\.?\s*/gi,        'GATA '],     // "Gata No. 123"
+  [/\bKHATA\s+NO\.?\s*/gi,       'KHATA '],    // "Khata No. 45"
+  [/\bDOOR\s+NO\.?\s*/gi,        'HNO '],      // "Door No. 23"
+  [/\bUNIT\s+NO\.?\s*/gi,        'FLAT '],     // "Unit No. 4"
+  [/\bSY\.?\s*NO\.?\s*/gi,       'SURVEY '],   // "Sy. No." (South India)
+  [/\bRS\.?\s*NO\.?\s*/gi,       'SURVEY '],   // "RS No."
   [/\bW\.?\s*DELHI\b/gi,         'WEST DELHI'],
   [/\bN\.?\s*DELHI\b/gi,         'NORTH DELHI'],
   [/\bS\.?\s*DELHI\b/gi,         'SOUTH DELHI'],
@@ -145,6 +158,12 @@ const TWO_WORD_LOCALITIES: Array<[RegExp, string]> = [
   [/\bGEETA\s+COLONY\b/g,          'GEETACOLONY'],
   [/\bPATPAR\s*GANJ\b/g,           'PATPARGANJ'],
   [/\bLAXMI\s+NAGAR\b/g,           'LAXMINAGAR'],
+  [/\bDILSHAD\s+GARDEN\b/g,        'DILSHADGARDEN'],
+  [/\bVASUNDHARA\s+ENCLAVE\b/g,    'VASUNDHARAENCLAVE'],
+  [/\bNEW\s+FRIENDS\s+COLONY\b/g,  'NEWFRIENDCOLONY'],
+  [/\bFRIENDS\s+COLONY\b/g,        'FRIENDSCOLONY'],
+  [/\bEAST\s+OF\s+KAILASH\b/g,     'EASTOFKAILASH'],
+  [/\bJANGPURA\b/g,                'JANGPURA'],
   [/\bKONDLI\b/g,                  'KONDLI'],
   [/\bSHAHDARA\b/g,                'SHAHDARA'],
   [/\bKARAWAL\s+NAGAR\b/g,         'KARAWALNAGAR'],
@@ -207,11 +226,14 @@ const LOCALITY_ALIASES: Record<string, string> = {
   'GEETA':       'GEETACOLONY',
   'PATPARGANJ':  'PATPARGANJ',
   'LAXMI':       'LAXMINAGAR',    'LAXMINAGAR':   'LAXMINAGAR',
-  'KONDLI':      'KONDLI',
-  'SHAHDARA':    'SHAHDARA',
-  'KARAWAL':     'KARAWALNAGAR',  'KARWAL':       'KARAWALNAGAR',
-  'BHAJAN':      'BHAJANPURA',    'BHAJANPURA':   'BHAJANPURA',
-  'SHASTRI':     'SHASTRINAGAR',
+  'KONDLI':         'KONDLI',
+  'SHAHDARA':       'SHAHDARA',
+  'DILSHAD':        'DILSHADGARDEN',   'DILSHADGARDEN':    'DILSHADGARDEN',
+  'VASUNDHARA':     'VASUNDHARAENCLAVE',
+  'JANGPURA':       'JANGPURA',
+  'KARAWAL':        'KARAWALNAGAR',    'KARWAL':           'KARAWALNAGAR',
+  'BHAJAN':         'BHAJANPURA',      'BHAJANPURA':       'BHAJANPURA',
+  'SHASTRI':        'SHASTRINAGAR',
   // Rohini
   'ROHINI':      'ROHINI',
   'MANGOL':      'MANGOLPURI',    'MANGOLPURI':   'MANGOLPURI',
@@ -237,6 +259,7 @@ const ZONE_KEYWORDS: Record<string, string> = {
   'CENTRAL':     'Central Zone',
   'NORTH':       'North Zone',
   'WEST':        'West Zone',
+  'EAST':        'Shahdara Zone',   // "EAST ZONE" in MCD = Shahdara
 };
 
 // Locality → zone (for cross-check when neither address mentions a zone explicitly)
@@ -262,15 +285,18 @@ const LOCALITY_TO_ZONE: Record<string, string> = {
   'LAJPATNAGAR':   'South Zone',
   'SARITAVIHAR':   'South Zone',
   'MALVIYANAGAR':  'South Zone',
-  'MAYURVIHAR':    'Shahdara Zone',
-  'PREETVIHAR':    'Shahdara Zone',
-  'SHAHDARA':      'Shahdara Zone',
-  'LAXMINAGAR':    'Shahdara Zone',
-  'PATPARGANJ':    'Shahdara Zone',
-  'KONDLI':        'Shahdara Zone',
-  'YAMUNAVIHAR':   'Shahdara Zone',
-  'BHAJANPURA':    'Shahdara Zone',
-  'GANDHINAGAR':   'Shahdara Zone',
+  'MAYURVIHAR':          'Shahdara Zone',
+  'PREETVIHAR':          'Shahdara Zone',
+  'SHAHDARA':            'Shahdara Zone',
+  'LAXMINAGAR':          'Shahdara Zone',
+  'PATPARGANJ':          'Shahdara Zone',
+  'KONDLI':              'Shahdara Zone',
+  'YAMUNAVIHAR':         'Shahdara Zone',
+  'BHAJANPURA':          'Shahdara Zone',
+  'GANDHINAGAR':         'Shahdara Zone',
+  'DILSHADGARDEN':       'Shahdara Zone',
+  'VASUNDHARAENCLAVE':   'Shahdara Zone',
+  'JANGPURA':            'South Zone',
   'NARELA':        'Narela Zone',
   'BAWANA':        'Narela Zone',
   'NAJAFGARH':     'Najafgarh Zone',
@@ -330,16 +356,22 @@ function extractPlotNumbers(address: string): string[] {
   const upper = preProcess(address).replace(/[^\w\s\/\-\.]/g, ' ');
   const found = new Set<string>();
 
-  // Alphanumeric codes: 1-3 letters + dash/slash + digits + optional letter/sub
+  // Letter-starting alphanumeric codes: "G-91", "RZ-11C", "BT-57", "M-24"
   for (const m of upper.matchAll(/\b([A-Z]{1,3}[-\/]\d+[A-Z]?(?:[-\/]\d+)?)\b/g))
     found.add(m[1]);
 
-  // Keyword-prefixed numbers: "Plot No. 57", "H.No. 234", "Khasra 812/4"
+  // Digit-letter suffix codes: "24-B", "234-C", "57/A", "24/B-1"
+  // Very common in DDA / MCD numbering (flat or house number with suffix)
+  for (const m of upper.matchAll(/\b(\d{1,5}[-\/][A-Z]\d*(?:[-\/]\d+)?)\b/g)) {
+    found.add(m[1]);
+    found.add(m[1].split(/[-\/]/)[0]); // base number
+  }
+
+  // Keyword-prefixed numbers: "Plot No. 57", "H.No. 234", "Khasra 812/4", "Flat 24-B"
   for (const m of upper.matchAll(
     /(?:HNO|PLOT|KHASRA|KHATA|GATA|SURVEY|FLAT|SHOP|DOOR|UNIT)\s+(\d+(?:[\/\-]\d+)?(?:[\/\-][A-Z\d]+)?)/g,
   )) {
     found.add(m[1]);
-    // Also add base (before first / or -)
     const base = m[1].split(/[\/\-]/)[0];
     if (base !== m[1]) found.add(base);
   }
@@ -349,7 +381,7 @@ function extractPlotNumbers(address: string): string[] {
     if (m[1].length <= 6) found.add(m[1]);
   }
 
-  return [...found].slice(0, 15);
+  return [...found].slice(0, 18);
 }
 
 /**
@@ -367,6 +399,17 @@ function extractBlockPlotCodes(address: string): string[] {
     .replace(/\(([A-Z]+)\)/g, (_, w) => DIRECTION_SUFFIXES.has(w) ? ' ' : ` ${w} `)
     .replace(/[^\w\s\/\-]/g, ' ');
   const found = new Set<string>();
+
+  // Decode compact DB-style codes: "BT-57", "RZ-11C", "GH-6-C" → compound codes directly.
+  // MCD database records often omit "Block" / "Plot" keywords and use this shorthand.
+  for (const m of upper.matchAll(/\b([A-Z]{1,4})-(\d+[A-Z]?(?:[-\/]\d+)?)\b/g)) {
+    if (!DIRECTION_SUFFIXES.has(m[1])) {
+      const pn = m[2];
+      found.add(`${m[1]}-${pn}`);
+      const base = pn.split(/[-\/]/)[0];
+      if (base !== pn) found.add(`${m[1]}-${base}`);
+    }
+  }
 
   // Collect block identifiers (strip parenthetical direction words)
   const blocks: string[] = [];
@@ -411,8 +454,11 @@ function extractPocketSectorCodes(address: string): string[] {
   const found = new Set<string>();
 
   const pockets: string[] = [];
-  for (const m of upper.matchAll(/\bPOCKET\s*[-]?\s*([A-Z\d]+)\b/g))
+  // Handle "Pocket J & K", "Pocket J AND K", "Pocket J-K", "Pocket J"
+  for (const m of upper.matchAll(/\bPOCKET\s*[-]?\s*([A-Z\d]+)(?:\s*(?:AND|&|\-)\s*([A-Z\d]+))?/g)) {
     pockets.push(m[1]);
+    if (m[2]) pockets.push(m[2]);
+  }
 
   const sectors: string[] = [];
   for (const m of upper.matchAll(/\bSECTOR\s*[-]?\s*(\d+)\b/g))
@@ -527,7 +573,18 @@ function compoundCodeHit(codes: string[], address: string): boolean {
   if (codes.length === 0) return false;
   const upper = address.toUpperCase().replace(/[^\w\s\/\-]/g, ' ');
   const tokens = new Set(upper.split(/\s+/));
-  return codes.some(c => tokens.has(c) || upper.replace(/\s+/g, '').includes(c.replace(/\-/g, '')));
+  const noSpace = upper.replace(/\s+/g, '');
+  return codes.some(c => {
+    if (tokens.has(c)) return true;
+    if (noSpace.includes(c.replace(/\-/g, ''))) return true;
+    // Also match space-separated form: code "BT-57" matches "BT 57" in DB address
+    const parts = c.split('-');
+    if (parts.length === 2 && /^[A-Z]+$/.test(parts[0]) && /^\d/.test(parts[1])) {
+      const re = new RegExp(`\\b${parts[0]}\\s+${parts[1]}\\b`);
+      if (re.test(upper)) return true;
+    }
+    return false;
+  });
 }
 
 /** Token overlap between two sets (Jaccard numerator). */
@@ -662,8 +719,12 @@ export class DemolitionService {
     const dbLocality    = localityTokens(dbAddr);
     const caseToks      = new Set(tokenise(caseAddr));
     const dbToks        = new Set(tokenise(dbAddr));
-    const caseZone      = inferZone(caseAddr);
-    const effectiveDbZone = dbZone ?? inferZone(dbAddr);
+    const caseZone    = inferZone(caseAddr);
+    // Prefer zone inferred from DB address TEXT over the stored zone field —
+    // MCD raw data has significant zone classification errors (e.g., Karol Bagh
+    // records stored under "Shahdara Zone"). Text inference is more reliable.
+    const inferredDbZone  = inferZone(dbAddr);
+    const effectiveDbZone = inferredDbZone ?? dbZone;
 
     // 1. Compound block-plot code (0-40)
     // Case: "Block BT + Plot 57" → "BT-57"; DB has "BT-57" as token → exact hit
@@ -676,9 +737,12 @@ export class DemolitionService {
     detail.caseCompound = caseCompound;
 
     // 2. Standalone alphanumeric code (0-35)
-    // "G-91" in both, "RZ-11C" in both — these are near-unique identifiers
-    const caseAlpha = casePlots.filter(p => /^[A-Z]/.test(p) && /\d/.test(p));
-    const dbAlpha   = dbPlots.filter(p => /^[A-Z]/.test(p) && /\d/.test(p));
+    // Covers both LETTER-digit ("G-91", "BT-57") and digit-LETTER ("24-B", "234-C") formats.
+    // Digit-letter suffix codes are very common in DDA/MCD flat numbering.
+    const isAlphaNum = (p: string) =>
+      (/^[A-Z]/.test(p) && /\d/.test(p)) || /^\d+[-\/][A-Z]/.test(p);
+    const caseAlpha = casePlots.filter(isAlphaNum);
+    const dbAlpha   = dbPlots.filter(isAlphaNum);
     const alphaHits = caseAlpha.filter(a => dbAlpha.some(d => plotCompatible(a, d)));
     // Also check if any case alpha code appears as token in DB and vice versa
     const alphaInDb  = caseAlpha.filter(a => compoundCodeHit([a], dbAddr));
@@ -736,12 +800,12 @@ export class DemolitionService {
     }
     detail.ownerScore = ownerScore;
 
-    // 8. Zone match (0-6)
+    // 8. Zone match (0-8)
     let zoneScore = 0;
     if (caseZone && effectiveDbZone) {
-      zoneScore = caseZone === effectiveDbZone ? 6 : 0;
-    } else if (caseZone && dbZone) {
-      // DB zone is stored explicitly — normalize for comparison
+      zoneScore = caseZone === effectiveDbZone ? 8 : 0;
+    } else if (caseZone && dbZone && !inferredDbZone) {
+      // Stored zone only (no text inference possible) — lower confidence
       zoneScore = dbZone.toLowerCase().includes(caseZone.split(' ')[0].toLowerCase()) ? 4 : 0;
     }
     detail.zoneScore = zoneScore;
@@ -751,10 +815,44 @@ export class DemolitionService {
     const tokenScore = Math.round((overlap / Math.max(caseToks.size, dbToks.size, 1)) * 15);
     detail.tokenOverlap = overlap;
 
+    // 10. Sub-number inside compact DB code (0-20)
+    // Catches "case plot=57 + locality=SHALIMARBAGH" vs DB "BT-57 Shalimar Bagh"
+    // Only fires when no stronger code signal already matched
+    let subNumScore = 0;
+    if (codeScore === 0 && alphaScore === 0) {
+      const dbCompactNums = [...dbAddr.toUpperCase().matchAll(/\b[A-Z]{1,4}-(\d+)\b/g)].map(m => m[1]);
+      const caseNums = casePlots.filter(p => /^\d+$/.test(p));
+      const subHits = caseNums.filter(n => dbCompactNums.some(d => plotCompatible(n, d)));
+      if (subHits.length > 0 && localityOverlap.length > 0) {
+        subNumScore = 20;
+      }
+    }
+    detail.subNumScore = subNumScore;
+
+    // 11. Locality mismatch penalty (0 or negative)
+    // "24-B" appears in thousands of Delhi properties. Without a locality anchor
+    // the match is noise. If the case has a clear locality but the DB record's
+    // locality doesn't overlap at all, heavily penalise.
+    let localityPenalty = 0;
+    if (caseLocality.size >= 1 && localityOverlap.length === 0 && dbLocality.size >= 1) {
+      localityPenalty = -32;
+    }
+    detail.localityPenalty = localityPenalty;
+
+    // 12. Zone mismatch penalty (0 or negative)
+    // Uses text-inferred zones (more reliable than stored field).
+    // Karol Bagh (Central Zone) should not match Dilshad Garden (Shahdara Zone).
+    let zonePenalty = 0;
+    if (caseZone && effectiveDbZone && caseZone !== effectiveDbZone) {
+      zonePenalty = -22;
+    }
+    detail.zonePenalty = zonePenalty;
+
     // ── Total ──
     const raw = codeScore + alphaScore + pocketScore + plotScore
-              + localityScore + partScore + ownerScore + zoneScore + tokenScore;
-    const score = Math.min(100, raw);
+              + localityScore + partScore + ownerScore + zoneScore + tokenScore + subNumScore
+              + localityPenalty + zonePenalty;
+    const score = Math.min(100, Math.max(0, raw)); // floor at 0, cap at 100
 
     // ── Determine dominant reason ──
     let reason = 'PARTIAL';
@@ -795,7 +893,7 @@ export class DemolitionService {
 
     const compoundCodes  = extractBlockPlotCodes(c.propertyAddress);
     const alphaCodes     = extractPlotNumbers(c.propertyAddress)
-                            .filter(p => /^[A-Z]/.test(p) && /\d/.test(p));
+                            .filter(p => (/^[A-Z]/.test(p) && /\d/.test(p)) || /^\d+[-\/][A-Z]/.test(p));
     const pocketCodes    = extractPocketSectorCodes(c.propertyAddress);
     const specificTerms  = [...new Set([...compoundCodes, ...alphaCodes, ...pocketCodes])];
 
@@ -841,7 +939,7 @@ export class DemolitionService {
         c.ownerName ?? null, dp.ownerName ?? null,
         dp.zone,
       );
-      if (score >= 20) {
+      if (score >= 15) {
         alerts.push({ demolitionPropertyId: dp.id, score, matchReason: reason });
       }
     }
@@ -989,7 +1087,8 @@ export class DemolitionService {
     };
 
     const compoundCodes = extractBlockPlotCodes(address);
-    const alphaCodes    = extractPlotNumbers(address).filter(p => /^[A-Z]/.test(p) && /\d/.test(p));
+    const alphaCodes    = extractPlotNumbers(address)
+      .filter(p => (/^[A-Z]/.test(p) && /\d/.test(p)) || /^\d+[-\/][A-Z]/.test(p));
     const pocketCodes   = extractPocketSectorCodes(address);
     const plotNums      = extractPlotNumbers(address).filter(p => /^\d+/.test(p));
     const lightToks     = lightTokenise(address);
@@ -1042,6 +1141,50 @@ export class DemolitionService {
     for (const r of await fetchRows(broadTerms, 120))
       if (!candidates.has(r.id)) candidates.set(r.id, r);
 
+    // Pass 4: AND-search — locality token + plot number in the same record.
+    // Catches compact DB format: "BT-57 Shalimar Bagh" when we have locality
+    // "SHALIMARBAGH" + plot number "57". Simple ILIKE '%57%' with LIMIT 120
+    // might miss the record if many records contain "57"; the AND constraint
+    // pins locality and makes the search highly selective.
+    const localityArr = [...localityTokens(address)]
+      .filter(l => l.length >= 6 && !LIGHT_STOP.has(l))
+      .slice(0, 3);
+    if (localityArr.length > 0 && plotNums.length > 0) {
+      for (const loc of localityArr) {
+        for (const num of plotNums.slice(0, 4)) {
+          const rows = await this.prisma.$queryRawUnsafe<DPRow[]>(
+            `SELECT id, address, zone, locality, "ownerName", "noticeDate", "noticeNumber", "bookingId"
+             FROM demolition_properties
+             WHERE address ILIKE $1 AND address ILIKE $2
+             LIMIT 40`,
+            `%${loc}%`, `%${num}%`,
+          );
+          for (const r of rows) if (!candidates.has(r.id)) candidates.set(r.id, r);
+        }
+      }
+    }
+
+    // Pass 5: block-letter prefix search — if case has "Block BT" we search
+    // "BT-%" records within the locality. Catches all "BT-*" variants.
+    const caseBlocks = compoundCodes
+      .map(c => c.split('-')[0])
+      .filter((b, i, a) => b && b.length >= 1 && b.length <= 4 && a.indexOf(b) === i)
+      .slice(0, 3);
+    if (caseBlocks.length > 0 && localityArr.length > 0) {
+      for (const block of caseBlocks) {
+        for (const loc of localityArr.slice(0, 2)) {
+          const rows = await this.prisma.$queryRawUnsafe<DPRow[]>(
+            `SELECT id, address, zone, locality, "ownerName", "noticeDate", "noticeNumber", "bookingId"
+             FROM demolition_properties
+             WHERE address ILIKE $1 AND address ILIKE $2
+             LIMIT 30`,
+            `%${block}-%`, `%${loc}%`,
+          );
+          for (const r of rows) if (!candidates.has(r.id)) candidates.set(r.id, r);
+        }
+      }
+    }
+
     // ── Score all candidates ──
     const scored = [...candidates.values()].map(dp => {
       const { score, reason, detail } = this.scoreAddressPair(
@@ -1068,7 +1211,9 @@ export class DemolitionService {
           ...detail,
           pincode: pincodeBonus > 0,
         },
-        confidence: finalScore >= 60 ? 'HIGH' : finalScore >= 30 ? 'MEDIUM' : 'LOW',
+        // Raised thresholds to reduce false positives from code-only matches
+        // without locality confirmation (e.g., "24-B" alone hitting Karol Bagh).
+        confidence: finalScore >= 65 ? 'HIGH' : finalScore >= 35 ? 'MEDIUM' : 'LOW',
         matchReason: reason,
       };
     });
@@ -1082,9 +1227,9 @@ export class DemolitionService {
 
     return {
       matches: [...best.values()]
-        .filter(s => s.score >= 10)
+        .filter(s => s.score >= 22)           // min bar raised; pure code-only hits filtered out
         .sort((a, b) => b.score - a.score)
-        .slice(0, 8),
+        .slice(0, 6),                          // top 6 — enough coverage, reduces noise
     };
   }
 }

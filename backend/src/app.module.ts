@@ -28,6 +28,7 @@ import { BillingModule } from './modules/billing/billing.module';
 import { MisModule } from './modules/mis/mis.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { DemolitionModule } from './modules/demolition/demolition.module';
+import { ReportTemplatesModule } from './modules/report-templates/report-templates.module';
 
 @Module({
   imports: [
@@ -65,6 +66,7 @@ import { DemolitionModule } from './modules/demolition/demolition.module';
     MisModule,
     NotificationsModule,
     DemolitionModule,
+    ReportTemplatesModule,
   ],
 
   providers: [

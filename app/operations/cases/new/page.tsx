@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { useQuery, useQueries } from '@tanstack/react-query'
+
 import { AppLayout } from '@/components/layout/app-layout'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -22,6 +22,7 @@ import {
   ArrowLeft,
   Building2,
   CheckCircle2,
+  ChevronDown,
   Home,
   Loader2,
   MapPin,
@@ -126,105 +127,170 @@ const INDIAN_STATES = [
 
 const AREA_UNITS = ['sqft', 'sqm', 'sqyd', 'acres', 'cents', 'guntha', 'bigha']
 
-// Words that carry no search signal on their own
-const ADDR_STOP = new Set([
-  'PART','OF','THE','AND','OR','AT','IN','ON','TO','FOR','NEAR',
-  'OPP','NO','NEW','A','AN','IS','BY','AS','NEAR','AREA','DELHI',
-])
-
-/**
- * Extract individual significant words from the typed address.
- * These are sent as parallel searches to the /demolition/properties endpoint.
- * Numbers ≥ 2 digits are kept (khasra/plot numbers).
- * Words ≥ 3 chars that aren't stop words are kept.
- */
-function extractWords(address: string): string[] {
-  if (!address || address.trim().length < 2) return []
-  const raw = address.toUpperCase().replace(/[^\w\s]/g, ' ').split(/\s+/)
-  return [...new Set(
-    raw.filter(w => {
-      if (!w || w.length < 2) return false
-      if (ADDR_STOP.has(w)) return false
-      if (/^\d+$/.test(w)) return w.length >= 2 // keep 2+ digit numbers
-      return w.length >= 3
-    })
-  )].slice(0, 8) // cap at 8 terms to limit parallel calls
-}
-
 const CONFIDENCE_STYLES: Record<string, { badge: string; row: string }> = {
-  HIGH:   { badge: 'bg-red-600 text-white',          row: 'bg-red-100 dark:bg-red-900/30 border-red-200 dark:border-red-800' },
-  MEDIUM: { badge: 'bg-orange-500 text-white',        row: 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800' },
-  LOW:    { badge: 'bg-yellow-500 text-white',        row: 'bg-yellow-50 dark:bg-yellow-900/10 border-yellow-200 dark:border-yellow-700' },
+  HIGH:   { badge: 'bg-red-600 text-white',     row: 'bg-red-100 dark:bg-red-900/30 border-red-200 dark:border-red-800' },
+  MEDIUM: { badge: 'bg-orange-500 text-white',  row: 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800' },
+  LOW:    { badge: 'bg-yellow-500 text-white',  row: 'bg-yellow-50 dark:bg-yellow-900/10 border-yellow-200 dark:border-yellow-700' },
 }
 
-function DemolitionMatchCard({ match }: { match: any }) {
+/** Expandable MCD demolition notice card — mirrors the official notice format */
+function LiveMatchCard({ match }: { match: any }) {
+  const [expanded, setExpanded] = useState(false)
   const style = CONFIDENCE_STYLES[match.confidence] ?? CONFIDENCE_STYLES.LOW
-  const reasons: string[] = []
-  if (match.matchedOn?.plotNumbers && match.matchedOn.matchedPlots?.length)
-    reasons.push(`Plot/No: ${match.matchedOn.matchedPlots.join(', ')}`)
-  if (match.matchedOn?.pincode)    reasons.push('Pincode')
-  if (match.matchedOn?.ownerName)  reasons.push('Owner name')
-  if (match.matchedOn?.locality)   reasons.push('Locality')
-  if (match.matchedOn?.addressTokens && !reasons.length) reasons.push('Address keywords')
+  const mo = match.matchedOn ?? {}
+
+  const signals: string[] = []
+  if (mo.compoundCode && (mo.caseCompound ?? []).length > 0)
+    signals.push(`Code: ${(mo.caseCompound as string[]).join(', ')}`)
+  else if ((mo.alphaCodeHits ?? []).length > 0)
+    signals.push(`Code: ${(mo.alphaCodeHits as string[]).join(', ')}`)
+  if ((mo.pocketSectorHits ?? []).length > 0)
+    signals.push(`Pocket/Sector: ${(mo.pocketSectorHits as string[]).join(', ')}`)
+  if ((mo.matchedPlots ?? []).length > 0)
+    signals.push(`Plot/No: ${(mo.matchedPlots as string[]).join(', ')}`)
+  if ((mo.localityHits ?? []).length > 0)
+    signals.push(`Area: ${(mo.localityHits as string[]).slice(0, 2).join(', ')}`)
+  if (mo.pincode) signals.push('Pincode')
+  if ((mo.ownerScore as number) > 0) signals.push('Owner name')
+
+  const fmtDate = match.noticeDate
+    ? new Date(match.noticeDate).toLocaleDateString('en-IN', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+      })
+    : null
 
   return (
-    <div className={`rounded border px-2.5 py-2 text-xs space-y-1 ${style.row}`}>
-      <div className="flex items-start justify-between gap-2">
-        <p className="font-medium text-red-800 dark:text-red-200 leading-snug flex-1">{match.address}</p>
-        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 ${style.badge}`}>
-          {match.confidence} {match.score}%
-        </span>
+    <div
+      className={`rounded-lg border overflow-hidden cursor-pointer select-none ${style.row}`}
+      onClick={() => setExpanded(e => !e)}
+    >
+      {/* ── Collapsed header — official MCD notice wording ── */}
+      <div className="px-3 py-2.5 text-xs">
+        <div className="flex items-start gap-2">
+          <div className="flex-1 min-w-0 space-y-1">
+            {/* Badge + zone */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${style.badge}`}>
+                {match.confidence} {match.score}%
+              </span>
+              {match.zone && (
+                <span className="text-[10px] text-red-600 dark:text-red-400 font-semibold uppercase tracking-wide">
+                  {match.zone}
+                </span>
+              )}
+            </div>
+
+            {/* Notice summary in formal MCD language */}
+            <p className="leading-snug text-red-800 dark:text-red-200">
+              Subject property is booked in MCD demolition list
+              {match.noticeNumber && (
+                <> vide file no.{' '}
+                  <span className="font-semibold font-mono">{match.noticeNumber}</span>
+                </>
+              )}
+              {fmtDate && <>, dt: <span className="font-medium">{fmtDate}</span></>}
+              {match.ownerName && (
+                <> in the name of <span className="font-semibold">{match.ownerName}</span></>
+              )}
+              {match.address && (
+                <>, w.r.t. address: <span className="font-medium">{match.address}</span></>
+              )}
+            </p>
+          </div>
+
+          {/* Expand chevron */}
+          <ChevronDown
+            className={`w-3.5 h-3.5 text-red-500 flex-shrink-0 mt-1 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
+          />
+        </div>
       </div>
-      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-red-600 dark:text-red-400">
-        {match.noticeNumber && <span>Notice: {match.noticeNumber}</span>}
-        {match.zone          && <span>Zone: {match.zone}</span>}
-        {match.noticeDate    && <span>{new Date(match.noticeDate).toLocaleDateString('en-IN')}</span>}
-        {match.ownerName     && <span>Owner: {match.ownerName}</span>}
-      </div>
-      {reasons.length > 0 && (
-        <p className="text-red-500 dark:text-red-500 italic">Matched on: {reasons.join(' · ')}</p>
+
+      {/* ── Expanded details panel ── */}
+      {expanded && (
+        <div
+          className="border-t border-red-200 dark:border-red-800 px-3 py-3 space-y-2.5 text-xs bg-red-50/60 dark:bg-red-950/20"
+          onClick={e => e.stopPropagation()}
+        >
+          {/* Key-value grid */}
+          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5">
+            {match.noticeNumber && (
+              <>
+                <span className="text-red-900 dark:text-red-100 font-semibold whitespace-nowrap">File No.</span>
+                <span className="font-mono text-red-700 dark:text-red-300 break-all">{match.noticeNumber}</span>
+              </>
+            )}
+            {match.bookingId && match.bookingId !== match.noticeNumber && (
+              <>
+                <span className="text-red-900 dark:text-red-100 font-semibold whitespace-nowrap">Booking ID</span>
+                <span className="font-mono text-red-700 dark:text-red-300">{match.bookingId}</span>
+              </>
+            )}
+            {fmtDate && (
+              <>
+                <span className="text-red-900 dark:text-red-100 font-semibold whitespace-nowrap">Notice Date</span>
+                <span className="text-red-700 dark:text-red-300">{fmtDate}</span>
+              </>
+            )}
+            {match.ownerName && (
+              <>
+                <span className="text-red-900 dark:text-red-100 font-semibold whitespace-nowrap">Owner / Builder</span>
+                <span className="text-red-700 dark:text-red-300">{match.ownerName}</span>
+              </>
+            )}
+            {match.zone && (
+              <>
+                <span className="text-red-900 dark:text-red-100 font-semibold whitespace-nowrap">Zone</span>
+                <span className="text-red-700 dark:text-red-300">{match.zone}</span>
+              </>
+            )}
+            {match.locality && (
+              <>
+                <span className="text-red-900 dark:text-red-100 font-semibold whitespace-nowrap">Locality</span>
+                <span className="text-red-700 dark:text-red-300">{match.locality}</span>
+              </>
+            )}
+          </div>
+
+          {/* Full address block */}
+          {match.address && (
+            <div className="pt-2 border-t border-red-200/70 dark:border-red-800/70">
+              <span className="font-semibold text-red-900 dark:text-red-100 block mb-1">w.r.t. Address</span>
+              <span className="text-red-700 dark:text-red-300 leading-snug">{match.address}</span>
+            </div>
+          )}
+
+          {/* Match signals */}
+          {signals.length > 0 && (
+            <div className="pt-2 border-t border-red-200/70 dark:border-red-800/70">
+              <span className="font-semibold text-red-900 dark:text-red-100 block mb-1">Matched on</span>
+              <div className="flex flex-wrap gap-1">
+                {signals.map(s => (
+                  <span key={s} className="text-[10px] bg-red-200/70 dark:bg-red-900/50 text-red-800 dark:text-red-200 px-1.5 py-0.5 rounded font-mono">
+                    {s}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Confidence score bar */}
+          <div className="pt-2 border-t border-red-200/70 dark:border-red-800/70">
+            <div className="flex items-center justify-between mb-1">
+              <span className="font-semibold text-red-900 dark:text-red-100">Match Confidence</span>
+              <span className="font-bold text-red-700 dark:text-red-300">{match.score}/100</span>
+            </div>
+            <div className="h-1.5 bg-red-200 dark:bg-red-900/50 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  match.confidence === 'HIGH' ? 'bg-red-600' :
+                  match.confidence === 'MEDIUM' ? 'bg-orange-500' : 'bg-yellow-500'
+                }`}
+                style={{ width: `${match.score}%` }}
+              />
+            </div>
+          </div>
+        </div>
       )}
-    </div>
-  )
-}
-
-/** Sidebar live result card — highlights which words triggered this match */
-function LiveMatchCard({ match, searchWords }: { match: any; searchWords: string[] }) {
-  const style = CONFIDENCE_STYLES[match.confidence] ?? CONFIDENCE_STYLES.LOW
-  const matchedSet = new Set((match.matchedWords ?? []).map((w: string) => w.toUpperCase()))
-
-  // Highlight matched words in the address string
-  function highlightAddress(addr: string) {
-    if (!addr) return addr
-    const parts = addr.split(/(\s+)/)
-    return parts.map((part, i) => {
-      const up = part.toUpperCase().replace(/[^\w]/g, '')
-      const hit = up.length >= 2 && matchedSet.has(up)
-      return hit
-        ? <mark key={i} className="bg-yellow-200 dark:bg-yellow-800/60 text-foreground rounded px-0.5 not-italic font-medium">{part}</mark>
-        : <span key={i}>{part}</span>
-    })
-  }
-
-  return (
-    <div className={`rounded-lg border px-3 py-2.5 text-xs space-y-1.5 ${style.row}`}>
-      <div className="flex items-start justify-between gap-2">
-        <p className="leading-snug flex-1 text-red-800 dark:text-red-200">
-          {highlightAddress(match.address)}
-        </p>
-        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap flex-shrink-0 ${style.badge}`}>
-          {match.confidence}
-        </span>
-      </div>
-      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-red-600 dark:text-red-400">
-        {match.zone         && <span>Zone: {match.zone}</span>}
-        {match.noticeNumber && <span>Notice: {match.noticeNumber}</span>}
-        {match.noticeDate   && <span>{new Date(match.noticeDate).toLocaleDateString('en-IN')}</span>}
-        {match.ownerName    && <span>Owner: {match.ownerName}</span>}
-      </div>
-      <p className="text-red-500 dark:text-red-500 italic">
-        Matched: {(match.matchedWords ?? []).join(' · ')}
-      </p>
     </div>
   )
 }
@@ -283,71 +349,46 @@ export default function AddNewCasePage() {
     notes: '',
   })
 
-  // ── Demolition live search ────────────────────────────────────────────
-  // Strategy: on every keystroke (250ms debounce), extract significant words
-  // from the typed address and run a parallel search for each word against
-  // /demolition/properties. Results are aggregated by ID — the more words a
-  // DB entry matches, the higher its confidence score.
-  // This uses the existing GET endpoint so it works regardless of whether the
-  // newer checkAddress POST endpoint is deployed.
+  // ── Demolition live check ─────────────────────────────────────────────
+  // Uses the backend's multi-signal checkAddress engine (compound code
+  // extraction, locality matching, zone inference, AND-search passes).
+  // This correctly handles verbose case addresses vs compact DB codes:
+  //   case:  "Plot No. 57, Block BT (Paschimi), Shalimar Bagh"
+  //   DB:    "BT-57  Shalimar Bagh  KESHAVPURAM ZONE"  → flagged HIGH
 
-  const [searchWords, setSearchWords] = useState<string[]>([])
+  const [demolitionMatches, setDemolitionMatches] = useState<any[]>([])
+  const [demoChecking, setDemoChecking] = useState(false)
   const [geocoding, setGeocoding] = useState(false)
 
   const api = useApi()
 
-  // 250ms debounce — fast enough to feel word-by-word
   useEffect(() => {
-    const t = setTimeout(() => {
-      setSearchWords(extractWords(form.propertyAddress))
-    }, 250)
-    return () => clearTimeout(t)
-  }, [form.propertyAddress])
-
-  // Parallel query per word
-  const wordQueries = useQueries({
-    queries: searchWords.map(word => ({
-      queryKey: ['demo-word', word],
-      queryFn: () => api.demolition.properties({ search: word, limit: 15 }),
-      staleTime: 60_000,
-      enabled: word.length >= 2,
-    })),
-  })
-
-  const demoChecking = wordQueries.some(q => q.isFetching)
-
-  // Aggregate: count how many words each DB entry matches
-  const demolitionMatches = useMemo(() => {
-    if (searchWords.length === 0) return []
-    const byId = new Map<string, { entry: any; matchedWords: string[] }>()
-    wordQueries.forEach((q, idx) => {
-      const word = searchWords[idx]
-      if (!q.data?.data) return
-      for (const entry of q.data.data) {
-        const existing = byId.get(entry.id)
-        if (existing) {
-          existing.matchedWords.push(word)
-        } else {
-          byId.set(entry.id, { entry, matchedWords: [word] })
-        }
+    const addr = form.propertyAddress?.trim()
+    if (!addr || addr.length < 8) {
+      setDemolitionMatches([])
+      return
+    }
+    const timer = setTimeout(async () => {
+      setDemoChecking(true)
+      try {
+        const result = await api.demolition.checkAddress({
+          address: addr,
+          ownerName: form.ownerName || undefined,
+          pincode: form.propertyPincode || undefined,
+        })
+        setDemolitionMatches(result.matches ?? [])
+      } catch {
+        setDemolitionMatches([])
+      } finally {
+        setDemoChecking(false)
       }
-    })
-    return [...byId.values()]
-      .sort((a, b) => b.matchedWords.length - a.matchedWords.length)
-      .map(({ entry, matchedWords }) => ({
-        ...entry,
-        matchedWords,
-        confidence:
-          matchedWords.length >= 3 ? 'HIGH'
-          : matchedWords.length >= 2 ? 'MEDIUM'
-          : 'LOW',
-        score: Math.min(100, matchedWords.length * 30),
-      }))
-      .slice(0, 8)
-  }, [wordQueries, searchWords])
+    }, 600)
+    return () => clearTimeout(timer)
+  }, [form.propertyAddress, form.ownerName, form.propertyPincode])
 
   const hasDemolitionFlag = demolitionMatches.length > 0
   const highRiskCount = demolitionMatches.filter((m: any) => m.confidence === 'HIGH').length
+  const hasTypedAddress = (form.propertyAddress?.trim().length ?? 0) >= 8
 
   const { data: orgsData } = useOrganizations({ limit: 200 })
   const organizations: any[] = orgsData?.data ?? orgsData ?? []
@@ -631,7 +672,7 @@ export default function AddNewCasePage() {
                     {demoChecking ? (
                       <>
                         <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
-                        <span className="text-muted-foreground">Searching MCD list...</span>
+                        <span className="text-muted-foreground">Scanning MCD database...</span>
                       </>
                     ) : hasDemolitionFlag ? (
                       <>
@@ -640,7 +681,7 @@ export default function AddNewCasePage() {
                           {demolitionMatches.length} demolition match{demolitionMatches.length > 1 ? 'es' : ''} — see sidebar
                         </span>
                       </>
-                    ) : searchWords.length > 0 ? (
+                    ) : hasTypedAddress ? (
                       <>
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
                         <span className="text-emerald-600 dark:text-emerald-400">Not in MCD demolition list</span>
@@ -896,7 +937,7 @@ export default function AddNewCasePage() {
 
             {/* ── Live MCD Search Panel ───────────────────────────── */}
             <Card className={
-              searchWords.length === 0
+              !hasTypedAddress
                 ? ''
                 : hasDemolitionFlag
                   ? 'border-red-300 dark:border-red-800'
@@ -913,33 +954,31 @@ export default function AddNewCasePage() {
                   {demoChecking && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
                 </div>
 
-                {/* Active search words chips */}
-                {searchWords.length > 0 && (
+                {/* Signal badge when active */}
+                {hasTypedAddress && !demoChecking && (
                   <div className="flex flex-wrap gap-1 mt-2">
-                    {searchWords.map(w => (
-                      <span key={w} className="text-[10px] px-1.5 py-0.5 bg-muted rounded font-mono text-muted-foreground">
-                        {w}
-                      </span>
-                    ))}
+                    <span className="text-[10px] px-1.5 py-0.5 bg-muted rounded font-mono text-muted-foreground">
+                      compound-code · locality · plot-number
+                    </span>
                   </div>
                 )}
               </CardHeader>
 
               <CardContent className="px-4 pb-4">
                 {/* Empty state */}
-                {searchWords.length === 0 && (
+                {!hasTypedAddress && (
                   <p className="text-xs text-muted-foreground text-center py-4">
                     Start typing the property address — matches appear here instantly
                   </p>
                 )}
 
                 {/* Searching */}
-                {searchWords.length > 0 && demoChecking && demolitionMatches.length === 0 && (
-                  <p className="text-xs text-muted-foreground text-center py-3">Searching 1,25,000+ MCD notices...</p>
+                {hasTypedAddress && demoChecking && demolitionMatches.length === 0 && (
+                  <p className="text-xs text-muted-foreground text-center py-3">Scanning 1,25,000+ MCD notices...</p>
                 )}
 
                 {/* No matches */}
-                {searchWords.length > 0 && !demoChecking && !hasDemolitionFlag && (
+                {hasTypedAddress && !demoChecking && !hasDemolitionFlag && (
                   <div className="flex items-center gap-2 py-3">
                     <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
                     <p className="text-xs text-emerald-700 dark:text-emerald-400 font-medium">
@@ -959,7 +998,7 @@ export default function AddNewCasePage() {
                       </span>
                     </div>
                     {demolitionMatches.map((m: any) => (
-                      <LiveMatchCard key={m.id} match={m} searchWords={searchWords} />
+                      <LiveMatchCard key={m.id} match={m} />
                     ))}
                   </div>
                 )}

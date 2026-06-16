@@ -127,7 +127,7 @@ export default function CaseDetailPage() {
           </TabsContent>
 
           <TabsContent value="report" className="space-y-4">
-            <ReportTab />
+            <ReportTab caseId={caseId} />
           </TabsContent>
 
           <TabsContent value="media" className="space-y-4">

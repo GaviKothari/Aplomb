@@ -5,8 +5,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreateCaseDto } from './dto/create-case.dto';
 import { UpdateCaseStatusDto } from './dto/update-case-status.dto';
 import { AssignCaseDto } from './dto/assign-case.dto';
-import { CaseStatus, UserRole } from '@prisma/client';
+import { CaseStatus, UserRole, ReportStatus, MediaType, MediaCategory, Prisma } from '@prisma/client';
 import { EventsGateway } from '../../gateways/events.gateway';
+import { StorageService } from '../../common/services/storage.service';
 
 // Valid status transitions
 const STATUS_TRANSITIONS: Record<CaseStatus, CaseStatus[]> = {
@@ -30,6 +31,7 @@ export class CasesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: EventsGateway,
+    private readonly storage: StorageService,
   ) {}
 
   async create(dto: CreateCaseDto, createdById: string) {
@@ -292,6 +294,106 @@ export class CasesService {
       LIMIT 10
     `;
     return cases;
+  }
+
+  // ── Field data submitted by engineer during/after site visit ──────────────
+  async submitFieldData(caseId: string, data: Record<string, any>, userId: string) {
+    const existing = await this.prisma.report.findFirst({ where: { caseId } });
+
+    const reportFields = {
+      propertyDescription:   data.propertyDescription ?? undefined,
+      propertyType:          data.propertyType        ?? undefined,
+      constructionStage:     data.constructionStage   ?? undefined,
+      totalFloors:           data.totalFloors != null ? Number(data.totalFloors) : undefined,
+      occupiedFloors:        data.occupiedFloors != null ? Number(data.occupiedFloors) : undefined,
+      totalArea:             data.totalArea != null ? Number(data.totalArea) : undefined,
+      builtUpArea:           data.builtUpArea != null ? Number(data.builtUpArea) : undefined,
+      carpetArea:            data.carpetArea != null ? Number(data.carpetArea) : undefined,
+      plotArea:              data.plotArea != null ? Number(data.plotArea) : undefined,
+      ageOfConstruction:     data.ageOfConstruction != null ? Number(data.ageOfConstruction) : undefined,
+      roadWidth:             data.roadWidth != null ? Number(data.roadWidth) : undefined,
+      facingDirection:       data.facingDirection    ?? undefined,
+      landRatePerSqFt:       data.landRatePerSqFt != null ? Number(data.landRatePerSqFt) : undefined,
+      buildingRatePerSqFt:   data.buildingRatePerSqFt != null ? Number(data.buildingRatePerSqFt) : undefined,
+      totalMarketValue:      data.totalMarketValue != null ? Number(data.totalMarketValue) : undefined,
+      distressValue:         data.distressValue != null ? Number(data.distressValue) : undefined,
+      siteObservations:      data.siteObservations   ?? undefined,
+      boundaryDescription:   data.boundaryDescription ?? undefined,
+      nearbyLandmarks:       data.nearbyLandmarks    ?? undefined,
+      amenities:             Array.isArray(data.amenities) ? data.amenities : undefined,
+      localityFeatures:      Array.isArray(data.localityFeatures) ? data.localityFeatures : undefined,
+      marketabilityRating:   data.marketabilityRating != null ? Number(data.marketabilityRating) : undefined,
+      liquidityRating:       data.liquidityRating != null ? Number(data.liquidityRating) : undefined,
+      valuationAsOn:         new Date(),
+    };
+
+    let report: any;
+    if (existing) {
+      report = await this.prisma.report.update({
+        where: { id: existing.id },
+        data: reportFields,
+      });
+    } else {
+      const caseRecord = await this.prisma.case.findUnique({ where: { id: caseId } });
+      if (!caseRecord) throw new NotFoundException('Case not found');
+      report = await this.prisma.report.create({
+        data: {
+          reportNumber: caseRecord.caseNumber,
+          caseId,
+          submittedById: userId,
+          status: ReportStatus.DRAFT,
+          ...reportFields,
+        },
+      });
+    }
+
+    this.events.emitCaseUpdate(caseId, 'field_data_submitted', { caseId, reportId: report.id });
+    return report;
+  }
+
+  // ── Upload site photos ─────────────────────────────────────────────────────
+  async uploadPhotos(caseId: string, files: Express.Multer.File[], userId: string) {
+    const saved: any[] = [];
+
+    for (const file of files) {
+      const key = `cases/${caseId}/photos/${Date.now()}-${file.originalname.replace(/\s+/g, '_')}`;
+      await this.storage.upload(key, file.buffer, file.mimetype);
+      const cdnUrl = this.storage.getPublicUrl(key);
+
+      const media = await this.prisma.caseMedia.create({
+        data: {
+          caseId,
+          uploadedById: userId,
+          mediaType: MediaType.PHOTO,
+          category: MediaCategory.OTHER,
+          fileName: file.originalname,
+          fileSizeBytes: file.size,
+          s3Key: key,
+          s3Bucket: 'aplomb-media',
+          cdnUrl,
+        },
+      });
+      saved.push(media);
+    }
+
+    this.events.emitCaseUpdate(caseId, 'photos_uploaded', { caseId, count: saved.length });
+    return { uploaded: saved.length, media: saved };
+  }
+
+  // ── Get the draft report for a case (for office view) ─────────────────────
+  async getCaseReport(caseId: string) {
+    return this.prisma.report.findFirst({
+      where: { caseId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        submittedBy: { select: { id: true, name: true } },
+        verifications: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          include: { verifier: { select: { id: true, name: true } } },
+        },
+      },
+    });
   }
 
   private async generateCaseNumber(): Promise<string> {

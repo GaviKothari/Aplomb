@@ -243,8 +243,30 @@ model Organization {
   rateCards       RateCard[]
   invoices        Invoice[]
   branches        BankBranch[]
+  reportTemplates ReportTemplate[]
 
   @@map("organizations")
+}
+
+model ReportTemplate {
+  id             String        @id @default(cuid())
+  name           String
+  description    String?
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  propertyType   PropertyType?
+  s3Key          String?
+  fileName       String?
+  isDefault      Boolean       @default(false)
+  isActive       Boolean       @default(true)
+  sortOrder      Int           @default(0)
+  uploadedById   String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([organizationId])
+  @@index([propertyType])
+  @@map("report_templates")
 }
 
 model BankBranch {
@@ -506,7 +528,12 @@ model Report {
   buildingValue       Decimal?  @db.Decimal(14, 2)
   totalMarketValue    Decimal?  @db.Decimal(14, 2)
   distressValue       Decimal?  @db.Decimal(14, 2)
+  insuranceValue      Decimal?  @db.Decimal(14, 2)
+  builtUpAreaApproved Decimal?  @db.Decimal(10, 2)
   valuationAsOn       DateTime?
+
+  // Office verification fields
+  officeRemarks       String?
 
   // Site Observations
   siteObservations    String?

@@ -2,14 +2,17 @@
 
 import { useState, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { useCase, useUpdateCaseStatus } from '@/lib/api/hooks'
+import { useCase, useUpdateCaseStatus, useSubmitFieldData, useUploadCasePhotos } from '@/lib/api/hooks'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Phone, MapPin, Navigation, Camera, ArrowLeft,
   PlayCircle, CheckCircle2, Upload, AlertTriangle,
+  ChevronDown, ChevronUp, Loader2,
 } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -32,6 +35,11 @@ const STATUS_LABEL: Record<string, string> = {
   REVISION_REQUESTED: 'Revision',
 }
 
+const PROPERTY_TYPES = ['Flat/Apartment', 'Independent House', 'Plot/Land', 'Commercial Shop', 'Commercial Office', 'Warehouse', 'Villa', 'Builder Floor']
+const CONSTRUCTION_STAGES = ['Under Construction', 'Ready to Move', 'Old Construction', 'Completed (New)']
+const FACING_DIRS = ['North', 'South', 'East', 'West', 'North-East', 'North-West', 'South-East', 'South-West']
+const AMENITIES_LIST = ['Lift', 'Parking', 'Club House', 'Swimming Pool', 'Gym', 'Power Backup', 'Security', 'Garden', 'Visitor Parking', 'CCTV']
+
 function InfoRow({ label, value }: { label: string; value?: string | null }) {
   if (!value) return null
   return (
@@ -42,17 +50,161 @@ function InfoRow({ label, value }: { label: string; value?: string | null }) {
   )
 }
 
+function Section({ title, children, defaultOpen = false }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <Card>
+      <button
+        className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold"
+        onClick={() => setOpen(v => !v)}
+      >
+        {title}
+        {open ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+      </button>
+      {open && <CardContent className="pt-0 pb-4 space-y-3">{children}</CardContent>}
+    </Card>
+  )
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">{label}</label>
+      {children}
+    </div>
+  )
+}
+
+function StarRating({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="flex gap-1">
+      {[1, 2, 3, 4, 5].map(n => (
+        <button
+          key={n}
+          onClick={() => onChange(n)}
+          className={`text-xl ${n <= value ? 'text-amber-400' : 'text-muted-foreground/30'}`}
+        >★</button>
+      ))}
+    </div>
+  )
+}
+
+const SHOW_FORM_STATUSES = new Set(['SITE_VISIT_IN_PROGRESS', 'SITE_VISIT_COMPLETED', 'REVISION_REQUESTED'])
+
 export default function EngineerCaseDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
   const { data, isLoading } = useCase(id)
   const updateStatus = useUpdateCaseStatus()
+  const submitField = useSubmitFieldData()
+  const uploadPhotos = useUploadCasePhotos()
+
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [photos, setPhotos] = useState<File[]>([])
   const [gpsError, setGpsError] = useState<string | null>(null)
   const [gettingGps, setGettingGps] = useState(false)
+  const [uploading, setUploading] = useState(false)
+
+  // Field data form state
+  const [form, setForm] = useState({
+    propertyType: '',
+    constructionStage: '',
+    totalFloors: '',
+    occupiedFloors: '',
+    facingDirection: '',
+    ageOfConstruction: '',
+    carpetArea: '',
+    builtUpArea: '',
+    plotArea: '',
+    roadWidth: '',
+    landRatePerSqFt: '',
+    buildingRatePerSqFt: '',
+    totalMarketValue: '',
+    distressValue: '',
+    siteObservations: '',
+    boundaryDescription: '',
+    nearbyLandmarks: '',
+    amenities: [] as string[],
+    localityFeatures: '',
+    marketabilityRating: 0,
+    liquidityRating: 0,
+  })
+
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+    setForm(f => ({ ...f, [k]: e.target.value }))
 
   const c = data?.data ?? data
+
+  const getGPS = (): Promise<GeolocationCoordinates> => new Promise((resolve, reject) => {
+    if (!navigator.geolocation) { reject(new Error('Geolocation not supported')); return }
+    setGettingGps(true)
+    navigator.geolocation.getCurrentPosition(
+      pos => { setGettingGps(false); resolve(pos.coords) },
+      err => { setGettingGps(false); reject(err) },
+      { enableHighAccuracy: true, timeout: 15000 },
+    )
+  })
+
+  const handleStartVisit = async () => {
+    try {
+      const coords = await getGPS()
+      updateStatus.mutate({ id, status: 'SITE_VISIT_IN_PROGRESS' })
+    } catch {
+      setGpsError('Enable GPS to start site visit')
+    }
+  }
+
+  const handleEndVisit = async () => {
+    try {
+      await getGPS()
+      updateStatus.mutate({ id, status: 'SITE_VISIT_COMPLETED' })
+    } catch {
+      setGpsError('Enable GPS to complete site visit')
+    }
+  }
+
+  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
+    setPhotos(prev => [...prev, ...files])
+  }
+
+  const handlePhotoUpload = async () => {
+    if (photos.length === 0) return
+    setUploading(true)
+    try {
+      await uploadPhotos.mutateAsync({ id, files: photos })
+      setPhotos([])
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleSubmitFieldData = () => {
+    const payload: Record<string, any> = { id }
+    if (form.propertyType)        payload.propertyType        = form.propertyType
+    if (form.constructionStage)   payload.constructionStage   = form.constructionStage
+    if (form.totalFloors)         payload.totalFloors         = Number(form.totalFloors)
+    if (form.occupiedFloors)      payload.occupiedFloors      = Number(form.occupiedFloors)
+    if (form.facingDirection)     payload.facingDirection     = form.facingDirection
+    if (form.ageOfConstruction)   payload.ageOfConstruction   = Number(form.ageOfConstruction)
+    if (form.carpetArea)          payload.carpetArea          = Number(form.carpetArea)
+    if (form.builtUpArea)         payload.builtUpArea         = Number(form.builtUpArea)
+    if (form.plotArea)            payload.plotArea            = Number(form.plotArea)
+    if (form.roadWidth)           payload.roadWidth           = Number(form.roadWidth)
+    if (form.landRatePerSqFt)     payload.landRatePerSqFt     = Number(form.landRatePerSqFt)
+    if (form.buildingRatePerSqFt) payload.buildingRatePerSqFt = Number(form.buildingRatePerSqFt)
+    if (form.totalMarketValue)    payload.totalMarketValue    = Number(form.totalMarketValue)
+    if (form.distressValue)       payload.distressValue       = Number(form.distressValue)
+    if (form.siteObservations)    payload.siteObservations    = form.siteObservations
+    if (form.boundaryDescription) payload.boundaryDescription = form.boundaryDescription
+    if (form.nearbyLandmarks)     payload.nearbyLandmarks     = form.nearbyLandmarks
+    if (form.localityFeatures)    payload.localityFeatures    = form.localityFeatures.split(',').map(s => s.trim()).filter(Boolean)
+    if (form.amenities.length)    payload.amenities           = form.amenities
+    if (form.marketabilityRating) payload.marketabilityRating = form.marketabilityRating
+    if (form.liquidityRating)     payload.liquidityRating     = form.liquidityRating
+
+    submitField.mutate(payload as { id: string; [k: string]: any })
+  }
 
   if (isLoading) {
     return (
@@ -77,70 +229,34 @@ export default function EngineerCaseDetailPage() {
   }
 
   const status = (c.status ?? '').toUpperCase()
-
-  const getGPS = (): Promise<GeolocationCoordinates> => new Promise((resolve, reject) => {
-    if (!navigator.geolocation) { reject(new Error('Geolocation not supported')); return }
-    setGettingGps(true)
-    navigator.geolocation.getCurrentPosition(
-      pos => { setGettingGps(false); resolve(pos.coords) },
-      err => { setGettingGps(false); reject(err) },
-      { enableHighAccuracy: true, timeout: 15000 },
-    )
-  })
-
-  const handleStartVisit = async () => {
-    try {
-      await getGPS()
-      updateStatus.mutate({ id, status: 'SITE_VISIT_IN_PROGRESS' })
-    } catch {
-      setGpsError('Enable GPS to start site visit')
-    }
-  }
-
-  const handleEndVisit = async () => {
-    try {
-      await getGPS()
-      updateStatus.mutate({ id, status: 'SITE_VISIT_COMPLETED' })
-    } catch {
-      setGpsError('Enable GPS to complete site visit')
-    }
-  }
-
-  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? [])
-    setPhotos(prev => [...prev, ...files])
-    toast.success(`${files.length} photo${files.length > 1 ? 's' : ''} selected`)
-  }
-
-  const ownerPhone = c.ownerPhone ?? c.owner?.phone
-  const ownerName = c.ownerName ?? c.owner?.name ?? c.ownerDetails?.name
-  const address = c.propertyAddress ?? c.address ?? c.propertyDetails?.address
+  const showForm = SHOW_FORM_STATUSES.has(status)
+  const ownerPhone = c.ownerContact ?? c.ownerPhone
+  const address = c.propertyAddress
 
   const mapsUrl = c.latitude && c.longitude
     ? `https://maps.google.com/?q=${c.latitude},${c.longitude}`
     : `https://maps.google.com/?q=${encodeURIComponent(address ?? '')}`
 
   return (
-    <div className="p-4 space-y-4 pb-6">
-      {/* Back + header */}
+    <div className="p-4 space-y-4 pb-8">
+      {/* Header */}
       <div className="flex items-center gap-3 pt-1">
         <button onClick={() => router.back()} className="p-1 -ml-1 rounded-md hover:bg-muted">
           <ArrowLeft className="h-5 w-5" />
         </button>
         <div className="min-w-0">
-          <h1 className="font-bold text-base truncate">{c.referenceNumber ?? id.slice(0, 8).toUpperCase()}</h1>
-          <p className="text-xs text-muted-foreground">{c.bankName ?? c.bank}</p>
+          <h1 className="font-bold text-base truncate">{c.caseNumber ?? id.slice(0, 8).toUpperCase()}</h1>
+          <p className="text-xs text-muted-foreground">{c.organization?.name}</p>
         </div>
         <Badge className={`ml-auto shrink-0 text-[10px] ${STATUS_COLOR[status] ?? 'bg-slate-100 text-slate-700'}`}>
           {STATUS_LABEL[status] ?? status}
         </Badge>
       </div>
 
-      {/* Owner quick actions */}
+      {/* Quick actions */}
       {(ownerPhone || address) && (
         <Card>
           <CardContent className="pt-4 pb-4">
-            <p className="text-xs text-muted-foreground mb-3 font-medium">Quick Actions</p>
             <div className="flex gap-2">
               {ownerPhone && (
                 <a href={`tel:${ownerPhone}`} className="flex-1">
@@ -150,14 +266,12 @@ export default function EngineerCaseDetailPage() {
                   </Button>
                 </a>
               )}
-              {address && (
-                <a href={mapsUrl} target="_blank" rel="noreferrer" className="flex-1">
-                  <Button variant="outline" size="sm" className="w-full gap-2 text-xs h-10">
-                    <Navigation className="h-4 w-4 text-blue-600" />
-                    Navigate
-                  </Button>
-                </a>
-              )}
+              <a href={mapsUrl} target="_blank" rel="noreferrer" className="flex-1">
+                <Button variant="outline" size="sm" className="w-full gap-2 text-xs h-10">
+                  <Navigation className="h-4 w-4 text-blue-600" />
+                  Navigate
+                </Button>
+              </a>
             </div>
           </CardContent>
         </Card>
@@ -169,16 +283,17 @@ export default function EngineerCaseDetailPage() {
           <CardTitle className="text-sm">Property Details</CardTitle>
         </CardHeader>
         <CardContent className="pb-4">
-          <InfoRow label="Address" value={address} />
-          <InfoRow label="Owner" value={ownerName} />
-          <InfoRow label="Owner Phone" value={ownerPhone} />
-          <InfoRow label="Bank" value={c.bankName ?? c.bank} />
-          <InfoRow label="Loan Reference" value={c.loanAccountNumber ?? c.loanRef} />
-          <InfoRow label="Priority" value={c.priority} />
+          <InfoRow label="Address"    value={address} />
+          <InfoRow label="Owner"      value={c.ownerName} />
+          <InfoRow label="Phone"      value={ownerPhone} />
+          <InfoRow label="Bank"       value={c.organization?.name} />
+          <InfoRow label="Loan Ref"   value={c.loanAccountNumber} />
+          <InfoRow label="Branch"     value={c.branchName} />
+          <InfoRow label="Priority"   value={c.priority} />
           <InfoRow label="Site Visit" value={c.siteVisitDate ? new Date(c.siteVisitDate).toLocaleDateString('en-IN') : null} />
           {c.notes && (
             <div className="mt-2 pt-2 border-t border-border/40">
-              <p className="text-xs text-muted-foreground mb-1">Notes</p>
+              <p className="text-xs text-muted-foreground mb-1">Notes from office</p>
               <p className="text-xs">{c.notes}</p>
             </div>
           )}
@@ -201,7 +316,7 @@ export default function EngineerCaseDetailPage() {
           <CardTitle className="text-sm">Site Visit</CardTitle>
         </CardHeader>
         <CardContent className="pb-4 space-y-3">
-          {status === 'ASSIGNED' || status === 'SITE_VISIT_SCHEDULED' ? (
+          {(status === 'ASSIGNED' || status === 'SITE_VISIT_SCHEDULED') && (
             <Button
               onClick={handleStartVisit}
               disabled={updateStatus.isPending || gettingGps}
@@ -210,7 +325,8 @@ export default function EngineerCaseDetailPage() {
               <PlayCircle className="h-4 w-4" />
               {gettingGps ? 'Getting GPS…' : updateStatus.isPending ? 'Starting…' : 'Start Site Visit'}
             </Button>
-          ) : status === 'SITE_VISIT_IN_PROGRESS' ? (
+          )}
+          {status === 'SITE_VISIT_IN_PROGRESS' && (
             <Button
               onClick={handleEndVisit}
               disabled={updateStatus.isPending || gettingGps}
@@ -219,61 +335,233 @@ export default function EngineerCaseDetailPage() {
               <CheckCircle2 className="h-4 w-4" />
               {gettingGps ? 'Getting GPS…' : updateStatus.isPending ? 'Saving…' : 'Complete Site Visit'}
             </Button>
-          ) : status === 'SITE_VISIT_COMPLETED' ? (
+          )}
+          {status === 'SITE_VISIT_COMPLETED' && (
             <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 text-sm">
               <CheckCircle2 className="h-4 w-4" />
               Site visit completed
             </div>
-          ) : null}
+          )}
+        </CardContent>
+      </Card>
 
-          {/* Photo upload */}
-          <div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              capture="environment"
-              className="hidden"
-              onChange={handlePhotoSelect}
-            />
-            <Button
-              variant="outline"
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full gap-2 text-xs"
-              size="sm"
-            >
-              <Camera className="h-4 w-4" />
-              {photos.length > 0 ? `${photos.length} photo${photos.length > 1 ? 's' : ''} selected` : 'Take / Upload Photos'}
-            </Button>
+      {/* Photos */}
+      <Card>
+        <CardHeader className="pb-2 pt-4">
+          <CardTitle className="text-sm">Site Photos</CardTitle>
+        </CardHeader>
+        <CardContent className="pb-4 space-y-3">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            capture="environment"
+            className="hidden"
+            onChange={handlePhotoSelect}
+          />
+          <Button
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+            className="w-full gap-2 text-xs"
+            size="sm"
+          >
+            <Camera className="h-4 w-4" />
+            {photos.length > 0 ? `${photos.length} photo${photos.length > 1 ? 's' : ''} selected` : 'Take / Select Photos'}
+          </Button>
 
-            {photos.length > 0 && (
-              <div className="mt-2 grid grid-cols-4 gap-1.5">
+          {photos.length > 0 && (
+            <>
+              <div className="grid grid-cols-4 gap-1.5">
                 {photos.map((f, i) => (
-                  <div key={i} className="aspect-square rounded-md overflow-hidden bg-muted">
-                    <img
-                      src={URL.createObjectURL(f)}
-                      alt=""
-                      className="w-full h-full object-cover"
-                    />
+                  <div key={i} className="aspect-square rounded-md overflow-hidden bg-muted relative">
+                    <img src={URL.createObjectURL(f)} alt="" className="w-full h-full object-cover" />
+                    <button
+                      onClick={() => setPhotos(p => p.filter((_, j) => j !== i))}
+                      className="absolute top-0.5 right-0.5 bg-black/60 text-white rounded-full w-4 h-4 text-[10px] leading-none flex items-center justify-center"
+                    >✕</button>
                   </div>
                 ))}
               </div>
-            )}
-
-            {photos.length > 0 && (
               <Button
-                className="w-full mt-2 gap-2 text-xs"
+                className="w-full gap-2 text-xs"
                 size="sm"
-                onClick={() => toast.info('Photo upload coming soon')}
+                onClick={handlePhotoUpload}
+                disabled={uploading}
               >
-                <Upload className="h-4 w-4" />
-                Upload {photos.length} Photo{photos.length > 1 ? 's' : ''}
+                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                {uploading ? 'Uploading…' : `Upload ${photos.length} Photo${photos.length > 1 ? 's' : ''}`}
               </Button>
-            )}
-          </div>
+            </>
+          )}
+
+          {/* Existing uploaded photos */}
+          {c.media && c.media.length > 0 && (
+            <div>
+              <p className="text-[11px] text-muted-foreground mb-1.5">Uploaded ({c.media.length})</p>
+              <div className="grid grid-cols-4 gap-1.5">
+                {c.media.slice(0, 12).map((m: any) => (
+                  <div key={m.id} className="aspect-square rounded-md overflow-hidden bg-muted">
+                    <img src={m.cdnUrl ?? m.thumbnailUrl} alt="" className="w-full h-full object-cover" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
+
+      {/* Field observation form — only shown when visit started/completed */}
+      {showForm && (
+        <>
+          <Section title="Property Information" defaultOpen={true}>
+            <Field label="Property Type">
+              <select
+                value={form.propertyType}
+                onChange={set('propertyType')}
+                className="w-full text-xs border border-border rounded-md px-3 py-2 bg-background"
+              >
+                <option value="">Select type…</option>
+                {PROPERTY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </Field>
+            <Field label="Construction Stage">
+              <select
+                value={form.constructionStage}
+                onChange={set('constructionStage')}
+                className="w-full text-xs border border-border rounded-md px-3 py-2 bg-background"
+              >
+                <option value="">Select stage…</option>
+                {CONSTRUCTION_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Total Floors">
+                <Input type="number" value={form.totalFloors} onChange={set('totalFloors')} placeholder="e.g. 4" className="text-xs h-9" />
+              </Field>
+              <Field label="Property on Floor">
+                <Input type="number" value={form.occupiedFloors} onChange={set('occupiedFloors')} placeholder="e.g. 2" className="text-xs h-9" />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Facing">
+                <select
+                  value={form.facingDirection}
+                  onChange={set('facingDirection')}
+                  className="w-full text-xs border border-border rounded-md px-3 py-2 bg-background"
+                >
+                  <option value="">Select…</option>
+                  {FACING_DIRS.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </Field>
+              <Field label="Age (years)">
+                <Input type="number" value={form.ageOfConstruction} onChange={set('ageOfConstruction')} placeholder="e.g. 10" className="text-xs h-9" />
+              </Field>
+            </div>
+          </Section>
+
+          <Section title="Measurements">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Carpet Area (sqft)">
+                <Input type="number" value={form.carpetArea} onChange={set('carpetArea')} placeholder="0" className="text-xs h-9" />
+              </Field>
+              <Field label="Built-up Area (sqft)">
+                <Input type="number" value={form.builtUpArea} onChange={set('builtUpArea')} placeholder="0" className="text-xs h-9" />
+              </Field>
+              <Field label="Plot Area (sqft)">
+                <Input type="number" value={form.plotArea} onChange={set('plotArea')} placeholder="0" className="text-xs h-9" />
+              </Field>
+              <Field label="Road Width (ft)">
+                <Input type="number" value={form.roadWidth} onChange={set('roadWidth')} placeholder="0" className="text-xs h-9" />
+              </Field>
+            </div>
+          </Section>
+
+          <Section title="Valuation">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Land Rate (₹/sqft)">
+                <Input type="number" value={form.landRatePerSqFt} onChange={set('landRatePerSqFt')} placeholder="0" className="text-xs h-9" />
+              </Field>
+              <Field label="Building Rate (₹/sqft)">
+                <Input type="number" value={form.buildingRatePerSqFt} onChange={set('buildingRatePerSqFt')} placeholder="0" className="text-xs h-9" />
+              </Field>
+            </div>
+            <Field label="Total Market Value (₹)">
+              <Input type="number" value={form.totalMarketValue} onChange={set('totalMarketValue')} placeholder="e.g. 5000000" className="text-xs h-9" />
+            </Field>
+            <Field label="Distress Value (₹)">
+              <Input type="number" value={form.distressValue} onChange={set('distressValue')} placeholder="e.g. 4000000" className="text-xs h-9" />
+            </Field>
+          </Section>
+
+          <Section title="Site Observations">
+            <Field label="Site Observations">
+              <Textarea
+                value={form.siteObservations}
+                onChange={set('siteObservations')}
+                placeholder="Describe the current condition of the property, structure, quality of construction…"
+                className="text-xs min-h-[90px]"
+              />
+            </Field>
+            <Field label="Boundary Description">
+              <Textarea
+                value={form.boundaryDescription}
+                onChange={set('boundaryDescription')}
+                placeholder="North: Road, South: House, East: Plot, West: Lane…"
+                className="text-xs min-h-[70px]"
+              />
+            </Field>
+            <Field label="Nearby Landmarks">
+              <Input value={form.nearbyLandmarks} onChange={set('nearbyLandmarks')} placeholder="School, hospital, metro station…" className="text-xs h-9" />
+            </Field>
+            <Field label="Locality Features (comma separated)">
+              <Input value={form.localityFeatures} onChange={set('localityFeatures')} placeholder="Metro nearby, good connectivity…" className="text-xs h-9" />
+            </Field>
+            <Field label="Amenities">
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {AMENITIES_LIST.map(a => {
+                  const checked = form.amenities.includes(a)
+                  return (
+                    <button
+                      key={a}
+                      onClick={() => setForm(f => ({
+                        ...f,
+                        amenities: checked ? f.amenities.filter(x => x !== a) : [...f.amenities, a],
+                      }))}
+                      className={`text-[11px] px-2 py-1 rounded-full border transition-colors ${
+                        checked ? 'bg-blue-600 text-white border-blue-600' : 'border-border text-muted-foreground'
+                      }`}
+                    >
+                      {a}
+                    </button>
+                  )
+                })}
+              </div>
+            </Field>
+          </Section>
+
+          <Section title="Ratings">
+            <Field label="Marketability (1 = low, 5 = high)">
+              <StarRating value={form.marketabilityRating} onChange={v => setForm(f => ({ ...f, marketabilityRating: v }))} />
+            </Field>
+            <Field label="Liquidity (1 = low, 5 = high)">
+              <StarRating value={form.liquidityRating} onChange={v => setForm(f => ({ ...f, liquidityRating: v }))} />
+            </Field>
+          </Section>
+
+          {/* Submit */}
+          <Button
+            onClick={handleSubmitFieldData}
+            disabled={submitField.isPending}
+            className="w-full h-11 gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold"
+          >
+            {submitField.isPending
+              ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
+              : <><CheckCircle2 className="h-4 w-4" /> Save Field Data</>
+            }
+          </Button>
+        </>
+      )}
 
       {/* Map link */}
       {address && (
