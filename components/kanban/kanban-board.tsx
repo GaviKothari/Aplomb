@@ -1,167 +1,258 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Case, CaseStatus } from '@/types'
-import { StatusBadge } from '@/components/cases/status-badge'
-import { GripVertical, Calendar, User, Briefcase } from 'lucide-react'
+import { GripVertical, Calendar, User, Briefcase, MapPin } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useUpdateCaseStatus } from '@/lib/api/hooks'
+import { toast } from 'sonner'
 
-interface KanbanBoardProps {
-  cases: Case[]
+interface ApiCase {
+  id: string
+  caseNumber: string
+  status: string
+  priority: string
+  propertyAddress: string
+  propertyCity?: string
+  caseType?: string
+  organization?: { name: string }
+  engineer?: { id: string; name: string }
+  createdAt: string
+  siteVisitDate?: string
+  totalMarketValue?: number | string
 }
 
-const COLUMNS: { status: CaseStatus; label: string; color: string }[] = [
-  { status: 'new', label: 'New', color: 'bg-blue-50 dark:bg-blue-950' },
-  { status: 'assigned', label: 'Assigned', color: 'bg-indigo-50 dark:bg-indigo-950' },
-  { status: 'site_visit_scheduled', label: 'Site Visit Scheduled', color: 'bg-purple-50 dark:bg-purple-950' },
-  { status: 'site_visit_completed', label: 'Site Visit Completed', color: 'bg-pink-50 dark:bg-pink-950' },
-  { status: 'under_verification', label: 'Under Verification', color: 'bg-amber-50 dark:bg-amber-950' },
-  { status: 'finalized', label: 'Finalized', color: 'bg-emerald-50 dark:bg-emerald-950' },
-  { status: 'on_hold', label: 'On Hold', color: 'bg-slate-50 dark:bg-slate-900' },
+interface KanbanBoardProps {
+  cases: ApiCase[]
+}
+
+const COLUMNS: { status: string; label: string; bg: string; border: string }[] = [
+  { status: 'NEW',                    label: 'New',               bg: 'bg-blue-50 dark:bg-blue-950/40',    border: 'border-blue-200 dark:border-blue-800' },
+  { status: 'ASSIGNED',               label: 'Assigned',          bg: 'bg-violet-50 dark:bg-violet-950/40', border: 'border-violet-200 dark:border-violet-800' },
+  { status: 'SITE_VISIT_SCHEDULED',   label: 'Visit Scheduled',   bg: 'bg-indigo-50 dark:bg-indigo-950/40', border: 'border-indigo-200 dark:border-indigo-800' },
+  { status: 'SITE_VISIT_IN_PROGRESS', label: 'Visit In Progress', bg: 'bg-sky-50 dark:bg-sky-950/40',      border: 'border-sky-200 dark:border-sky-800' },
+  { status: 'SITE_VISIT_COMPLETED',   label: 'Visit Completed',   bg: 'bg-cyan-50 dark:bg-cyan-950/40',    border: 'border-cyan-200 dark:border-cyan-800' },
+  { status: 'UNDER_VERIFICATION',     label: 'Under Verification',bg: 'bg-amber-50 dark:bg-amber-950/40',  border: 'border-amber-200 dark:border-amber-800' },
+  { status: 'REVISION_REQUESTED',     label: 'Revision Requested',bg: 'bg-orange-50 dark:bg-orange-950/40',border: 'border-orange-200 dark:border-orange-800' },
+  { status: 'FINALIZED',              label: 'Finalized',         bg: 'bg-emerald-50 dark:bg-emerald-950/40',border: 'border-emerald-200 dark:border-emerald-800' },
+  { status: 'ON_HOLD',                label: 'On Hold',           bg: 'bg-slate-50 dark:bg-slate-900/40',  border: 'border-slate-200 dark:border-slate-700' },
 ]
 
-const priorityColors: Record<string, string> = {
-  low: 'border-l-4 border-l-emerald-500',
-  medium: 'border-l-4 border-l-amber-500',
-  high: 'border-l-4 border-l-orange-500',
-  critical: 'border-l-4 border-l-red-500',
+const priorityLeft: Record<string, string> = {
+  CRITICAL: 'border-l-4 border-l-red-500',
+  HIGH:     'border-l-4 border-l-orange-500',
+  MEDIUM:   'border-l-4 border-l-amber-400',
+  LOW:      'border-l-4 border-l-emerald-400',
+}
+
+const priorityBadge: Record<string, string> = {
+  CRITICAL: 'bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-300',
+  HIGH:     'bg-orange-100 text-orange-800 dark:bg-orange-900/60 dark:text-orange-300',
+  MEDIUM:   'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300',
+  LOW:      'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300',
+}
+
+function formatValue(v?: number | string): string | null {
+  const n = typeof v === 'string' ? parseFloat(v) : v
+  if (!n || isNaN(n)) return null
+  if (n >= 10_000_000) return `₹${(n / 10_000_000).toFixed(1)}Cr`
+  if (n >= 100_000) return `₹${(n / 100_000).toFixed(1)}L`
+  return `₹${n.toLocaleString('en-IN')}`
+}
+
+function formatDate(d?: string): string | null {
+  if (!d) return null
+  return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
 }
 
 export function KanbanBoard({ cases }: KanbanBoardProps) {
-  const [cardData, setCardData] = useState(cases)
-  const [draggedCard, setDraggedCard] = useState<Case | null>(null)
-  const [hoveredColumn, setHoveredColumn] = useState<CaseStatus | null>(null)
+  const router = useRouter()
+  const [localCases, setLocalCases] = useState<ApiCase[]>(cases)
+  const [hoveredCol, setHoveredCol] = useState<string | null>(null)
+  const draggedRef = useRef<ApiCase | null>(null)
+  const prevStatusRef = useRef<string>('')
 
-  const getCasesByStatus = useCallback(
-    (status: CaseStatus) => cardData.filter((c) => c.status === status),
-    [cardData]
+  // Keep in sync when parent refetches
+  const prevCasesRef = useRef(cases)
+  if (prevCasesRef.current !== cases) {
+    prevCasesRef.current = cases
+    setLocalCases(cases)
+  }
+
+  const updateStatus = useUpdateCaseStatus()
+
+  const byStatus = useCallback(
+    (status: string) => localCases.filter((c) => c.status === status),
+    [localCases],
   )
 
-  const handleDragStart = (card: Case) => {
-    setDraggedCard(card)
+  const handleDragStart = (c: ApiCase) => {
+    draggedRef.current = c
+    prevStatusRef.current = c.status
   }
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'move'
-  }
-
-  const handleDrop = (status: CaseStatus) => {
-    if (draggedCard) {
-      const updated = cardData.map((c) =>
-        c.id === draggedCard.id ? { ...c, status, lastUpdated: new Date().toISOString().split('T')[0] } : c
-      )
-      setCardData(updated)
-      setDraggedCard(null)
-      setHoveredColumn(null)
+  const handleDrop = (targetStatus: string) => {
+    const dragged = draggedRef.current
+    if (!dragged || dragged.status === targetStatus) {
+      draggedRef.current = null
+      setHoveredCol(null)
+      return
     }
+
+    // Optimistic update
+    setLocalCases((prev) =>
+      prev.map((c) => (c.id === dragged.id ? { ...c, status: targetStatus } : c)),
+    )
+    draggedRef.current = null
+    setHoveredCol(null)
+
+    updateStatus.mutate(
+      { id: dragged.id, status: targetStatus },
+      {
+        onError: () => {
+          // Revert
+          setLocalCases((prev) =>
+            prev.map((c) =>
+              c.id === dragged.id ? { ...c, status: prevStatusRef.current } : c,
+            ),
+          )
+          toast.error('Failed to update status — change reverted')
+        },
+      },
+    )
   }
 
   return (
     <div className="overflow-x-auto pb-4">
-      <div className="flex gap-4 min-w-full">
-        {COLUMNS.map((column) => {
-          const columnCases = getCasesByStatus(column.status)
-          const isHovered = hoveredColumn === column.status
+      <div className="flex gap-3 min-w-max">
+        {COLUMNS.map((col) => {
+          const colCases = byStatus(col.status)
+          const isHovered = hoveredCol === col.status
 
           return (
-            <div key={column.status} className="flex-shrink-0 w-80 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div key={col.status} className="flex-shrink-0 w-72">
               {/* Column header */}
-              <div className={cn(
-                'mb-4 p-3 rounded-lg transition-all duration-200',
-                isHovered && 'bg-primary/5 shadow-sm'
-              )}>
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="font-semibold text-sm text-foreground">{column.label}</h3>
-                  <Badge variant="secondary" className="bg-primary/10 text-primary">
-                    {columnCases.length}
-                  </Badge>
-                </div>
+              <div className="flex items-center justify-between mb-3 px-1">
+                <span className="text-xs font-semibold text-foreground tracking-wide uppercase">
+                  {col.label}
+                </span>
+                <Badge
+                  variant="secondary"
+                  className="text-xs h-5 min-w-5 flex items-center justify-center rounded-full"
+                >
+                  {colCases.length}
+                </Badge>
               </div>
 
               {/* Drop zone */}
               <div
                 onDragOver={(e) => {
-                  handleDragOver(e)
-                  setHoveredColumn(column.status)
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'move'
+                  setHoveredCol(col.status)
                 }}
-                onDragLeave={() => setHoveredColumn(null)}
-                onDrop={() => handleDrop(column.status)}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                    setHoveredCol(null)
+                  }
+                }}
+                onDrop={() => handleDrop(col.status)}
                 className={cn(
-                  'rounded-lg p-3 min-h-96 border-2 transition-all duration-200',
+                  'rounded-xl border-2 p-2 min-h-96 transition-all duration-150',
+                  col.bg,
                   isHovered
-                    ? 'border-primary/50 bg-primary/5 shadow-md scale-[1.02]'
-                    : 'border-dashed border-border bg-muted/20',
-                  column.color
+                    ? 'border-primary/60 shadow-md ring-1 ring-primary/20 scale-[1.01]'
+                    : col.border + ' border-dashed',
                 )}
               >
-                <div className="space-y-3">
-                  {columnCases.map((caseItem, index) => (
+                <div className="space-y-2">
+                  {colCases.map((c, i) => (
                     <Card
-                      key={caseItem.id}
+                      key={c.id}
                       draggable
-                      onDragStart={() => handleDragStart(caseItem)}
+                      onDragStart={() => handleDragStart(c)}
+                      onClick={() => router.push(`/operations/cases/${c.id}`)}
                       className={cn(
-                        'p-3 cursor-move transition-all duration-200 hover:shadow-lg hover:scale-[1.02] stagger-item animate-in fade-in slide-in-from-bottom-4',
-                        priorityColors[caseItem.priority],
-                        draggedCard?.id === caseItem.id && 'opacity-50 shadow-xl scale-95'
+                        'p-3 cursor-grab active:cursor-grabbing select-none',
+                        'transition-all duration-150 hover:shadow-md hover:-translate-y-0.5',
+                        'animate-in fade-in slide-in-from-bottom-2',
+                        priorityLeft[c.priority] ?? 'border-l-4 border-l-slate-300',
                       )}
-                      style={{ animationDelay: `${index * 50}ms` }}
+                      style={{ animationDelay: `${i * 30}ms` }}
                     >
-                      {/* Case ID with drag handle */}
-                      <div className="flex items-start gap-2 mb-2">
-                        <GripVertical className="w-4 h-4 text-muted-foreground flex-shrink-0 mt-0.5" />
-                        <span className="font-semibold text-sm text-foreground">{caseItem.id}</span>
+                      {/* Header row */}
+                      <div className="flex items-start gap-1.5 mb-1.5">
+                        <GripVertical className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0 mt-0.5" />
+                        <span className="font-semibold text-xs text-foreground leading-tight">
+                          {c.caseNumber}
+                        </span>
                       </div>
 
-                      {/* Property address */}
-                      <p className="text-xs text-muted-foreground mb-3 line-clamp-2 pl-6">
-                        {caseItem.propertyAddress}
+                      {/* Address */}
+                      <p className="text-xs text-muted-foreground mb-2 pl-5 line-clamp-2 leading-snug">
+                        {c.propertyAddress}
                       </p>
 
-                      {/* Details grid */}
-                      <div className="space-y-2 mb-3 pl-6">
-                        <div className="flex items-center gap-2 text-xs">
-                          <Briefcase className="w-3 h-3 text-primary/60 flex-shrink-0" />
-                          <span className="font-medium">{caseItem.bank}</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs">
-                          <User className="w-3 h-3 text-primary/60 flex-shrink-0" />
-                          <span className="text-muted-foreground">{caseItem.engineer}</span>
-                        </div>
+                      {/* Meta rows */}
+                      <div className="space-y-1 mb-2 pl-5">
+                        {c.organization?.name && (
+                          <div className="flex items-center gap-1.5 text-xs">
+                            <Briefcase className="w-3 h-3 text-primary/50 flex-shrink-0" />
+                            <span className="font-medium truncate">{c.organization.name}</span>
+                          </div>
+                        )}
+                        {c.engineer?.name && (
+                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <User className="w-3 h-3 text-primary/50 flex-shrink-0" />
+                            <span className="truncate">{c.engineer.name}</span>
+                          </div>
+                        )}
+                        {c.propertyCity && (
+                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <MapPin className="w-3 h-3 text-primary/50 flex-shrink-0" />
+                            <span className="truncate">{c.propertyCity}</span>
+                          </div>
+                        )}
                       </div>
 
-                      {/* Priority & Amount */}
-                      <div className="flex items-center justify-between gap-2 pl-6">
-                        <Badge 
-                          className={cn(
-                            'capitalize text-xs font-medium',
-                            caseItem.priority === 'critical' && 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300',
-                            caseItem.priority === 'high' && 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300',
-                            caseItem.priority === 'medium' && 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300',
-                            caseItem.priority === 'low' && 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-300'
-                          )}
+                      {/* Footer */}
+                      <div className="flex items-center justify-between gap-1 pl-5">
+                        <Badge
                           variant="secondary"
+                          className={cn(
+                            'text-[10px] h-4 px-1.5 capitalize font-medium',
+                            priorityBadge[c.priority] ?? '',
+                          )}
                         >
-                          {caseItem.priority}
+                          {c.priority?.toLowerCase()}
                         </Badge>
-                        {caseItem.amount && (
-                          <span className="text-xs font-semibold text-primary">
-                            ₹{(caseItem.amount / 100000).toFixed(1)}L
-                          </span>
-                        )}
+                        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                          {formatValue(c.totalMarketValue) && (
+                            <span className="font-semibold text-primary/80">
+                              {formatValue(c.totalMarketValue)}
+                            </span>
+                          )}
+                          {formatDate(c.siteVisitDate ?? c.createdAt) && (
+                            <span className="flex items-center gap-0.5">
+                              <Calendar className="w-2.5 h-2.5" />
+                              {formatDate(c.siteVisitDate ?? c.createdAt)}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </Card>
                   ))}
 
-                  {columnCases.length === 0 && (
-                    <div className={cn(
-                      'text-center py-12 text-muted-foreground text-xs transition-colors duration-200',
-                      isHovered && 'text-primary/60'
-                    )}>
-                      {draggedCard ? 'Drop case here' : 'No cases'}
+                  {colCases.length === 0 && (
+                    <div
+                      className={cn(
+                        'text-center py-10 text-xs text-muted-foreground/60',
+                        isHovered && 'text-primary/60 font-medium',
+                      )}
+                    >
+                      {isHovered ? 'Drop here' : 'Empty'}
                     </div>
                   )}
                 </div>
