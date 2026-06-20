@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -74,12 +74,9 @@ export function KanbanBoard({ cases }: KanbanBoardProps) {
   const draggedRef = useRef<ApiCase | null>(null)
   const prevStatusRef = useRef<string>('')
 
-  // Keep in sync when parent refetches
-  const prevCasesRef = useRef(cases)
-  if (prevCasesRef.current !== cases) {
-    prevCasesRef.current = cases
+  useEffect(() => {
     setLocalCases(cases)
-  }
+  }, [cases])
 
   const updateStatus = useUpdateCaseStatus()
 
