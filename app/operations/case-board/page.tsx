@@ -47,6 +47,8 @@ export default function KanbanPage() {
     limit: 500,
     search: search || undefined,
     priority: priority === 'all' ? undefined : priority,
+    sortBy: 'createdAt',
+    sortOrder: 'desc',
   })
 
   const cases = data?.data ?? []

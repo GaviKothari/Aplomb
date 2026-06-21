@@ -29,15 +29,16 @@ interface KanbanBoardProps {
 }
 
 const COLUMNS: { status: string; label: string; bg: string; border: string }[] = [
-  { status: 'NEW',                    label: 'New',               bg: 'bg-blue-50 dark:bg-blue-950/40',    border: 'border-blue-200 dark:border-blue-800' },
-  { status: 'ASSIGNED',               label: 'Assigned',          bg: 'bg-violet-50 dark:bg-violet-950/40', border: 'border-violet-200 dark:border-violet-800' },
-  { status: 'SITE_VISIT_SCHEDULED',   label: 'Visit Scheduled',   bg: 'bg-indigo-50 dark:bg-indigo-950/40', border: 'border-indigo-200 dark:border-indigo-800' },
-  { status: 'SITE_VISIT_IN_PROGRESS', label: 'Visit In Progress', bg: 'bg-sky-50 dark:bg-sky-950/40',      border: 'border-sky-200 dark:border-sky-800' },
-  { status: 'SITE_VISIT_COMPLETED',   label: 'Visit Completed',   bg: 'bg-cyan-50 dark:bg-cyan-950/40',    border: 'border-cyan-200 dark:border-cyan-800' },
-  { status: 'UNDER_VERIFICATION',     label: 'Under Verification',bg: 'bg-amber-50 dark:bg-amber-950/40',  border: 'border-amber-200 dark:border-amber-800' },
-  { status: 'REVISION_REQUESTED',     label: 'Revision Requested',bg: 'bg-orange-50 dark:bg-orange-950/40',border: 'border-orange-200 dark:border-orange-800' },
+  { status: 'NEW',                    label: 'New',               bg: 'bg-blue-50 dark:bg-blue-950/40',      border: 'border-blue-200 dark:border-blue-800' },
+  { status: 'ASSIGNED',               label: 'Assigned',          bg: 'bg-violet-50 dark:bg-violet-950/40',  border: 'border-violet-200 dark:border-violet-800' },
+  { status: 'SITE_VISIT_SCHEDULED',   label: 'Visit Scheduled',   bg: 'bg-indigo-50 dark:bg-indigo-950/40',  border: 'border-indigo-200 dark:border-indigo-800' },
+  { status: 'SITE_VISIT_IN_PROGRESS', label: 'Visit In Progress', bg: 'bg-sky-50 dark:bg-sky-950/40',        border: 'border-sky-200 dark:border-sky-800' },
+  { status: 'SITE_VISIT_COMPLETED',   label: 'Visit Completed',   bg: 'bg-cyan-50 dark:bg-cyan-950/40',      border: 'border-cyan-200 dark:border-cyan-800' },
+  { status: 'UNDER_VERIFICATION',     label: 'Under Verification',bg: 'bg-amber-50 dark:bg-amber-950/40',    border: 'border-amber-200 dark:border-amber-800' },
+  { status: 'REVISION_REQUESTED',     label: 'Revision Requested',bg: 'bg-orange-50 dark:bg-orange-950/40',  border: 'border-orange-200 dark:border-orange-800' },
   { status: 'FINALIZED',              label: 'Finalized',         bg: 'bg-emerald-50 dark:bg-emerald-950/40',border: 'border-emerald-200 dark:border-emerald-800' },
-  { status: 'ON_HOLD',                label: 'On Hold',           bg: 'bg-slate-50 dark:bg-slate-900/40',  border: 'border-slate-200 dark:border-slate-700' },
+  { status: 'SENT_TO_BANK',           label: 'Sent to Bank',      bg: 'bg-teal-50 dark:bg-teal-950/40',      border: 'border-teal-200 dark:border-teal-800' },
+  { status: 'ON_HOLD',                label: 'On Hold',           bg: 'bg-slate-50 dark:bg-slate-900/40',    border: 'border-slate-200 dark:border-slate-700' },
 ]
 
 const priorityLeft: Record<string, string> = {
