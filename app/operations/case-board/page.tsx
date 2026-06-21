@@ -12,7 +12,7 @@ import { useCases } from '@/lib/api/hooks'
 import { Search, RefreshCw, Kanban } from 'lucide-react'
 
 const PRIORITY_OPTIONS = [
-  { value: '', label: 'All Priorities' },
+  { value: 'all', label: 'All Priorities' },
   { value: 'CRITICAL', label: 'Critical' },
   { value: 'HIGH', label: 'High' },
   { value: 'MEDIUM', label: 'Medium' },
@@ -41,12 +41,12 @@ function BoardSkeleton() {
 
 export default function KanbanPage() {
   const [search, setSearch] = useState('')
-  const [priority, setPriority] = useState('')
+  const [priority, setPriority] = useState('all')
 
   const { data, isLoading, refetch, isRefetching } = useCases({
     limit: 500,
     search: search || undefined,
-    priority: priority || undefined,
+    priority: priority === 'all' ? undefined : priority,
   })
 
   const cases = data?.data ?? []
@@ -111,7 +111,7 @@ export default function KanbanPage() {
               variant="ghost"
               size="sm"
               className="h-8 px-2 text-xs"
-              onClick={() => { setSearch(''); setPriority('') }}
+              onClick={() => { setSearch(''); setPriority('all') }}
             >
               Clear filters
             </Button>
