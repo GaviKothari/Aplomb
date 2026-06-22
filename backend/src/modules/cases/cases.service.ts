@@ -79,6 +79,23 @@ export class CasesService {
     return newCase;
   }
 
+  async bulkCreate(rows: CreateCaseDto[], createdById: string) {
+    const results: { row: number; success: boolean; caseNumber?: string; error?: string }[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      try {
+        const c = await this.create(rows[i], createdById);
+        results.push({ row: i + 1, success: true, caseNumber: c.caseNumber });
+      } catch (err: any) {
+        results.push({ row: i + 1, success: false, error: err?.message ?? 'Unknown error' });
+      }
+    }
+
+    const created = results.filter((r) => r.success).length;
+    const failed = results.filter((r) => !r.success).length;
+    return { created, failed, total: rows.length, results };
+  }
+
   async findAll(query: {
     page?: number; limit?: number; search?: string; status?: CaseStatus;
     organizationId?: string; engineerId?: string; priority?: string;

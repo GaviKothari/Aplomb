@@ -61,6 +61,15 @@ export function useCreateCase() {
   });
 }
 
+export function useBulkImportCases() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (rows: any[]) => api.cases.bulkImport(rows),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['cases'] }),
+  });
+}
+
 export function useUpdateCaseStatus() {
   const api = useApi();
   const qc = useQueryClient();

@@ -12,6 +12,7 @@ import {
   MessageSquare,
   Zap,
   LayoutTemplate,
+  Upload,
   type LucideIcon,
 } from 'lucide-react'
 import { UserRole } from '@/types'
@@ -53,6 +54,7 @@ export const navConfig: NavSection[] = [
         children: [
           { title: 'List View', href: '/operations/cases', visibleFor: ['admin', 'engineer', 'coordinator'] },
           { title: 'Kanban Board', href: '/operations/case-board', visibleFor: ['admin', 'coordinator'] },
+          { title: 'Bulk Import', href: '/operations/import', icon: Upload, visibleFor: ['admin', 'coordinator'] },
         ],
       },
       {

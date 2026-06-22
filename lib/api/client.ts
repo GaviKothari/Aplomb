@@ -84,6 +84,7 @@ export function createApiClient(getToken: () => Promise<string | null>) {
       list: (p?: any) => api<any>('/cases', { params: p }),
       get: (id: string) => api<any>(`/cases/${id}`),
       create: (body: any) => api<any>('/cases', { method: 'POST', body }),
+      bulkImport: (rows: any[]) => api<any>('/cases/bulk', { method: 'POST', body: { rows } }),
       updateStatus: (id: string, body: any) => api<any>(`/cases/${id}/status`, { method: 'PATCH', body }),
       assign: (id: string, body: any) => api<any>(`/cases/${id}/assign`, { method: 'PATCH', body }),
       history: (id: string) => api<any>(`/cases/${id}/history`),

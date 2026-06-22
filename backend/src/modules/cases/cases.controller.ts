@@ -3,7 +3,7 @@ import {
   UseInterceptors, UploadedFiles,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { CasesService } from './cases.service';
 import { CreateCaseDto } from './dto/create-case.dto';
 import { UpdateCaseStatusDto } from './dto/update-case-status.dto';
@@ -23,6 +23,13 @@ export class CasesController {
   @ApiOperation({ summary: 'Create a single case' })
   create(@Body() dto: CreateCaseDto, @CurrentUser() user: User) {
     return this.service.create(dto, user.id);
+  }
+
+  @Post('bulk')
+  @Roles(UserRole.ADMIN, UserRole.COORDINATOR)
+  @ApiOperation({ summary: 'Bulk import cases from parsed CSV/Excel rows' })
+  bulkCreate(@Body() body: { rows: CreateCaseDto[] }, @CurrentUser() user: User) {
+    return this.service.bulkCreate(body.rows, user.id);
   }
 
   @Get()
