@@ -60,7 +60,7 @@ export class CasesController {
     @Body() dto: UpdateCaseStatusDto,
     @CurrentUser() user: User,
   ) {
-    return this.service.updateStatus(id, dto, user.id);
+    return this.service.updateStatus(id, dto, user.id, user.role);
   }
 
   @Patch(':id/assign')

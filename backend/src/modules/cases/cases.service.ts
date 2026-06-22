@@ -140,11 +140,12 @@ export class CasesService {
     return c;
   }
 
-  async updateStatus(id: string, dto: UpdateCaseStatusDto, userId: string) {
+  async updateStatus(id: string, dto: UpdateCaseStatusDto, userId: string, userRole?: UserRole) {
     const c = await this.findOne(id);
     const allowed = STATUS_TRANSITIONS[c.status];
 
-    if (!allowed.includes(dto.status)) {
+    const isPrivileged = userRole === UserRole.ADMIN || userRole === UserRole.COORDINATOR;
+    if (!isPrivileged && !allowed.includes(dto.status)) {
       throw new BadRequestException(
         `Cannot transition from ${c.status} to ${dto.status}. Allowed: ${allowed.join(', ')}`,
       );
