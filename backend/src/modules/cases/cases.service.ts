@@ -458,7 +458,14 @@ export class CasesService {
       ...this.caseListInclude(),
       siteVisitLog: true,
       demolitionAlerts: {
-        include: { demolitionProperty: true },
+        select: {
+          id: true,
+          matchStatus: true,
+          confidenceScore: true,
+          matchReason: true,
+          createdAt: true,
+          demolitionProperty: true,
+        },
       },
     };
   }
