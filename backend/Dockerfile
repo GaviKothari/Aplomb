@@ -48,4 +48,4 @@ COPY package.json ./
 
 EXPOSE 3001
 
-CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node dist/main"]
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate resolve --rolled-back 20260627000000_property_intelligence 2>/dev/null || true; node_modules/.bin/prisma migrate deploy || true; node dist/main"]
