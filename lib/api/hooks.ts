@@ -576,6 +576,20 @@ export function useUpdateDemolitionAlert() {
   })
 }
 
+export function useCleanupNonDelhiAlerts() {
+  const api = useApi()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.demolition.cleanupNonDelhi(),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ['demolition-alerts'] })
+      qc.invalidateQueries({ queryKey: ['demolition-stats'] })
+      toast.success(`Cleanup done — removed ${data.purged} false alerts, kept ${data.kept}`)
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
+}
+
 // ── MIS Dashboard ─────────────────────────────────────────────
 export function useMisSnapshot() {
   const api = useApi();

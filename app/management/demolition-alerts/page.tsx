@@ -18,11 +18,12 @@ import {
 import {
   useDemolitionStats, useDemolitionZones, useDemolitionProperties,
   useDemolitionAlerts, useMatchAllDemolition, useUpdateDemolitionAlert,
+  useCleanupNonDelhiAlerts,
 } from '@/lib/api/hooks'
 import {
   AlertTriangle, Shield, Database, CheckCircle2, Search,
   RefreshCw, Eye, XCircle, ChevronLeft, ChevronRight, MapPin,
-  FileText, CalendarDays, Building2,
+  FileText, CalendarDays, Building2, Trash2,
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -461,6 +462,7 @@ function AnalyticsTab({ stats }: { stats: any }) {
 // ── PAGE ─────────────────────────────────────────────────────────────────────
 export default function DemolitionAlertsPage() {
   const { data: stats, isLoading: statsLoading } = useDemolitionStats()
+  const cleanup = useCleanupNonDelhiAlerts()
 
   return (
     <AppLayout>
@@ -473,6 +475,16 @@ export default function DemolitionAlertsPage() {
               MCD unauthorized construction notices · cross-matched against active cases
             </p>
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2 text-xs text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+            onClick={() => cleanup.mutate()}
+            disabled={cleanup.isPending}
+          >
+            <Trash2 className={`w-3.5 h-3.5 ${cleanup.isPending ? 'animate-pulse' : ''}`} />
+            {cleanup.isPending ? 'Cleaning up…' : 'Remove Non-Delhi Alerts'}
+          </Button>
         </div>
 
         {/* KPI row */}

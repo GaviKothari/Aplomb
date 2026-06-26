@@ -208,6 +208,7 @@ export function createApiClient(getToken: () => Promise<string | null>) {
       matchAll:      () => api<any>('/demolition/match-all', { method: 'POST' }),
       updateAlert:   (id: string, body: any) =>
         api<any>(`/demolition/alerts/${id}`, { method: 'PATCH', body }),
+      cleanupNonDelhi: () => api<any>('/demolition/cleanup-non-delhi', { method: 'POST' }),
     },
 
     // MIS
