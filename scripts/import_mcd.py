@@ -12,7 +12,7 @@ from datetime import datetime
 
 DATABASE_URL = (
     "postgresql://neondb_owner:npg_nulK56mjPFga"
-    "@ep-wild-silence-atatxihx-pooler.c-9.us-east-1.aws.neon.tech"
+    "@ep-wild-silence-atatxihx.c-9.us-east-1.aws.neon.tech"
     "/neondb?sslmode=require"
 )
 
