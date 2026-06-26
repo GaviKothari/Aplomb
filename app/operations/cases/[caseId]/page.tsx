@@ -139,7 +139,7 @@ export default function CaseDetailPage() {
           </TabsContent>
 
           <TabsContent value="history" className="space-y-4">
-            <HistoryTab />
+            <HistoryTab caseId={caseId} />
           </TabsContent>
         </Tabs>
       </div>

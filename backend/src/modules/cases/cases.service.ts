@@ -227,10 +227,19 @@ export class CasesService {
   }
 
   async getHistory(id: string) {
-    return this.prisma.caseStatusHistory.findMany({
+    const history = await this.prisma.caseStatusHistory.findMany({
       where: { caseId: id },
-      orderBy: { changedAt: 'desc' },
+      orderBy: { changedAt: 'asc' },
     });
+
+    const userIds = [...new Set(history.map((h) => h.changedById))];
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, name: true, email: true, role: true },
+    });
+    const userMap = Object.fromEntries(users.map((u) => [u.id, u]));
+
+    return history.map((h) => ({ ...h, changedBy: userMap[h.changedById] ?? null }));
   }
 
   async startSiteVisit(id: string, lat: number, lng: number, userId: string) {
