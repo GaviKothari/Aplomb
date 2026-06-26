@@ -1087,16 +1087,35 @@ model DemolitionAlert {
   demolitionPropertyId String
   demolitionProperty   DemolitionProperty    @relation(fields: [demolitionPropertyId], references: [id])
   matchStatus          DemolitionMatchStatus @default(POTENTIAL)
-  confidenceScore      Int                   // 0-100
-  matchReason          String?               // ADDRESS, PINCODE, GPS, ALL
+  confidenceScore      Int                   // 0-100 percentage
+  matchReason          String?               // dominant signal label
+  reasons              Json?                 // Array<{ signal, weight, contribution, matched, detail? }>
   distanceMeters       Decimal?              @db.Decimal(8, 2)
   dismissedById        String?
   dismissedAt          DateTime?
   dismissalReason      String?
+  // Human feedback — coordinator marks Correct or Wrong match
+  humanFeedback        String?               // CORRECT | WRONG
+  feedbackBy           String?               // userId
+  feedbackAt           DateTime?
   createdAt            DateTime              @default(now())
 
   @@unique([caseId, demolitionPropertyId])
   @@map("demolition_alerts")
+}
+
+// ── Address Alias table (replaces hardcoded TS maps) ──────────────────────────
+// Admin-editable via UI — no deployment needed to add a new alias.
+model AddressAlias {
+  id        String   @id @default(cuid())
+  alias     String   @unique               // Input token (uppercase), e.g. "GK", "PASCHIMI"
+  canonical String                          // Output canonical form, e.g. "GREATERKAILASH"
+  zone      String?                         // Optional zone hint
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([alias])
+  @@map("address_aliases")
 }
 
 // ============================================================

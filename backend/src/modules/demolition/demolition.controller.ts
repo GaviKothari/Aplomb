@@ -78,4 +78,38 @@ export class DemolitionController {
   ) {
     return this.service.updateAlertStatus(id, body.status, body.reason, user.id);
   }
+
+  @Post('alerts/:id/feedback')
+  @Roles(UserRole.ADMIN, UserRole.COORDINATOR, UserRole.HR)
+  @ApiOperation({ summary: 'Mark an alert as CORRECT or WRONG match (human feedback loop)' })
+  recordFeedback(
+    @Param('id') id: string,
+    @Body() body: { feedback: 'CORRECT' | 'WRONG' },
+    @CurrentUser() user: User,
+  ) {
+    return this.service.recordFeedback(id, body.feedback, user.id);
+  }
+
+  @Get('aliases')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'List all address aliases (admin-editable locality map)' })
+  getAliases() {
+    return this.service.getAliases();
+  }
+
+  @Post('aliases')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Create or update an address alias' })
+  upsertAlias(
+    @Body() body: { alias: string; canonical: string; zone?: string },
+  ) {
+    return this.service.upsertAlias(body.alias, body.canonical, body.zone);
+  }
+
+  @Patch('aliases/:alias')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Delete an address alias' })
+  deleteAlias(@Param('alias') alias: string) {
+    return this.service.deleteAlias(alias);
+  }
 }

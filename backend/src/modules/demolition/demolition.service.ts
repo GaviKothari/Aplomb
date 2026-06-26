@@ -1,660 +1,324 @@
 /**
- * DemolitionService — property cross-match engine
+ * DemolitionService — Property Intelligence Engine
  *
- * Handles 1.2 lakh MCD demolition records. Addresses arrive in two very
- * different formats:
+ * Architecture:
+ *   raw address
+ *     ↓ normalizeAddress()        → NormalizedAddress (structured components)
+ *     ↓ searchCandidates()        → top 20 via pg_trgm similarity
+ *     ↓ rankMatch()               → confidence % + reasons[]
+ *     ↓ threshold filter          → CONFIRMED ≥ 70 / POTENTIAL ≥ 40
+ *     ↓ upsert DemolitionAlert    → with stored reasons JSON
  *
- *   Case (verbose):  "Plot No. 57, Second Floor, Block BT (Paschimi),
- *                     Shalimar Bagh, New Delhi – 110088"
- *   DB (compact):    "BT-57  Shalimar Bagh  Shalimar Bagh  KESHAVPURAM ZONE"
+ * Feature weights:
+ *   Block+Plot code   30%   "BT-57" exact compound
+ *   Locality          25%   same canonical locality
+ *   Plot/House No.    15%   same identifier
+ *   Block letter      10%   same block
+ *   Pincode            8%   same 6-digit pincode
+ *   Owner surname      7%   same last name
+ *   Zone               5%   same MCD zone
+ *   ─────────────────────
+ *   Total            100%
  *
- * The engine extracts multiple independent signals from each address and
- * scores candidate pairs. A single strong signal (compound code) is enough
- * for HIGH confidence; weaker signals accumulate to MEDIUM / LOW.
- *
- * PERFORMANCE NOTE FOR DBAs:
- *   With 1.2 lakh rows, adding a pg_trgm GIN index turns ILIKE '%X%' from a
- *   sequential scan into an index scan. Recommended migration:
- *
- *     CREATE EXTENSION IF NOT EXISTS pg_trgm;
- *     CREATE INDEX CONCURRENTLY idx_demolition_address_trgm
- *       ON demolition_properties USING GIN (address gin_trgm_ops);
+ *   Locality mismatch  −50%  (different localities = high penalty)
+ *   Zone mismatch      −35%  (different zones = medium penalty)
  */
 
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleInit, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
+import { normalizeAddress, isNonDelhiAddress, NormalizedAddress } from './address-normalizer';
 
-// ─── Geographic guard ────────────────────────────────────────────────────────
-//
-// MCD (Municipal Corporation of Delhi) has jurisdiction ONLY over Delhi.
-// Any case property outside Delhi must be rejected immediately — no scoring.
-// Delhi pincodes: 110001–110096.  NCR pincodes outside Delhi start with 12x/20x/13x.
+// ── Feature weight map ────────────────────────────────────────────────────────
 
-const NON_DELHI_CITIES = new Set([
-  'GURUGRAM', 'GURGAON', 'NOIDA', 'GREATER NOIDA', 'GHAZIABAD',
-  'FARIDABAD', 'MANESAR', 'SONIPAT', 'PALWAL', 'REWARI', 'BHIWADI',
-  'MUMBAI', 'BANGALORE', 'BENGALURU', 'CHENNAI', 'HYDERABAD',
-  'PUNE', 'KOLKATA', 'AHMEDABAD', 'SURAT', 'JAIPUR', 'LUCKNOW',
-  'PATNA', 'BHOPAL', 'INDORE', 'NAGPUR', 'CHANDIGARH', 'LUDHIANA',
-  'AMRITSAR', 'AGRA', 'MEERUT', 'ALLAHABAD', 'PRAYAGRAJ', 'KANPUR',
-  'VARANASI', 'DEHRADUN', 'HARIDWAR', 'RANCHI', 'RAIPUR', 'COIMBATORE',
-  'MYSORE', 'MYSURU', 'VISAKHAPATNAM', 'KOCHI', 'THIRUVANANTHAPURAM',
-]);
-
-const NON_DELHI_STATES = [
-  'HARYANA', 'UTTAR PRADESH', 'RAJASTHAN', 'MAHARASHTRA', 'KARNATAKA',
-  'TAMIL NADU', 'TELANGANA', 'ANDHRA PRADESH', 'GUJARAT', 'PUNJAB',
-  'WEST BENGAL', 'MADHYA PRADESH', 'UTTARAKHAND', 'JHARKHAND',
-  'CHHATTISGARH', 'KERALA', 'ODISHA', 'ASSAM', 'BIHAR',
-];
-
-/** Returns true when the address is clearly outside Delhi's MCD jurisdiction. */
-function isNonDelhiAddress(address: string): boolean {
-  const upper = address.toUpperCase().replace(/[^\w\s]/g, ' ');
-
-  // 1. Pincode outside Delhi range (110001–110096 → starts with "11")
-  const pin = upper.match(/\b(\d{6})\b/)?.[1];
-  if (pin && !pin.startsWith('11')) return true;
-
-  // 2. Explicit non-Delhi city name
-  for (const city of NON_DELHI_CITIES) {
-    if (upper.includes(city)) return true;
-  }
-
-  // 3. State names that are never Delhi
-  for (const state of NON_DELHI_STATES) {
-    if (upper.includes(state)) return true;
-  }
-
-  // 4. Common short abbreviations used in Indian addresses
-  // "HR" = Haryana, "UP" = Uttar Pradesh — only when clearly a state code context
-  if (/\bHARYANA\b/.test(upper) || /[\s,\-]HR[\s,\-]/.test(upper)) return true;
-
-  return false;
-}
-
-// ─── Stop-word sets ──────────────────────────────────────────────────────────
-
-/** For cross-match (matchCase): aggressive — keeps only area/locality words. */
-const STOP = new Set([
-  'NEW', 'DELHI', 'NCR', 'THE', 'AND', 'OF', 'AT', 'IN', 'ON', 'TO',
-  'FOR', 'NEAR', 'OPP', 'OPPOSITE', 'ADJOINING', 'PART', 'NO', 'FLOOR',
-  'GROUND', 'FIRST', 'SECOND', 'THIRD', 'FOURTH', 'UPPER', 'LOWER',
-  'FLAT', 'BLOCK', 'SECTOR', 'PHASE', 'POCKET', 'PLOT', 'HOUSE',
-  'KHASRA', 'KHATA', 'GATA', 'SURVEY', 'DDA', 'MIG', 'LIG', 'EWS',
-  'HIG', 'BPL', 'ZONE', 'ROAD', 'MARG', 'STREET', 'GALI', 'LANE',
-  'MARKET', 'COLONY', 'EXTENSION', 'EXTN', 'NAGAR', 'VIHAR', 'VILLAGE',
-  'VPO', 'POST', 'OFFICE', 'DISTRICT', 'DIST', 'STATE', 'INDIA',
-  'FLOOR', 'STOREY', 'BUILDING', 'APARTMENT', 'APT', 'SOCIETY', 'SOC',
-  'HOUSING', 'BOARD', 'AUTHORITY', 'PROJECT', 'SCHEME', 'FLATS',
-  'LATE', 'SON', 'DAUGHTER', 'WIFE', 'WO', 'SO', 'DO',
-]);
-
-/** For live check (checkAddress): lighter — keeps KHASRA, PLOT, SECTOR, numbers. */
-const LIGHT_STOP = new Set([
-  'NEW', 'DELHI', 'NCR', 'THE', 'AND', 'OF', 'AT', 'IN', 'ON', 'TO',
-  'FOR', 'NEAR', 'OPP', 'OPPOSITE', 'ADJOINING',
-  'FLOOR', 'GROUND', 'FIRST', 'SECOND', 'THIRD', 'UPPER', 'LOWER',
-  'MIG', 'LIG', 'EWS', 'HIG',
-  'ZONE', 'ROAD', 'MARG', 'STREET', 'GALI', 'LANE',
-  'STATE', 'INDIA', 'BUILDING', 'LATE', 'SON', 'DAUGHTER', 'WIFE',
-  'WO', 'SO', 'DO',
-]);
-
-// ─── Roman numerals ──────────────────────────────────────────────────────────
-
-const ROMAN_MAP: Record<string, number> = {
-  I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8,
-  IX: 9, X: 10, XI: 11, XII: 12, XIII: 13, XIV: 14, XV: 15,
+const WEIGHTS = {
+  blockPlotCode:     30,
+  locality:          25,
+  plotNo:            15,
+  block:             10,
+  pincode:            8,
+  ownerSurname:       7,
+  zone:               5,
+  // Penalties (applied as negatives)
+  localityMismatch: -50,
+  zoneMismatch:     -35,
 };
 
-function romanToNumber(word: string): number | null {
-  return ROMAN_MAP[word.toUpperCase()] ?? null;
+export interface MatchSignal {
+  signal:       string
+  weight:       number       // contribution weight (can be negative for penalties)
+  matched:      boolean
+  contribution: number       // actual points added (0 if not matched)
+  detail?:      string
 }
 
-// ─── Abbreviation expansion ──────────────────────────────────────────────────
-
-/** Expand common Indian address abbreviations BEFORE any other processing. */
-const ABBREV_REPLACEMENTS: Array<[RegExp, string]> = [
-  [/\bBLK\.?\b/gi,               'BLOCK '],
-  [/\bSECT?\.?\b(?=\s*[\d])/gi,  'SECTOR '],   // "Sec. 8" → "Sector 8"
-  [/\bPKT\.?\b/gi,               'POCKET '],
-  [/\bH\.?\s*NO\.?\s*/gi,        'HNO '],
-  [/\bPL\.?\s*NO\.?\s*/gi,       'PLOT '],
-  [/\bKH\.?\s*NO\.?\s*/gi,       'KHASRA '],
-  [/\bSH\.?\s*NO\.?\s*/gi,       'SHOP '],
-  [/\bF\.?\s*NO\.?\s*/gi,        'FLAT '],
-  // Full-word "X No." forms that abbreviation rules don't catch
-  [/\bPLOT\s+NO\.?\s*/gi,        'PLOT '],     // "Plot No. 57" → "PLOT 57"
-  [/\bKHASRA\s+NO\.?\s*/gi,      'KHASRA '],   // "Khasra No. 812"
-  [/\bSURVEY\s+NO\.?\s*/gi,      'SURVEY '],   // "Survey No. 45"
-  [/\bHOUSE\s+NO\.?\s*/gi,       'HNO '],      // "House No. 234"
-  [/\bSHOP\s+NO\.?\s*/gi,        'SHOP '],     // "Shop No. 5"
-  [/\bFLAT\s+NO\.?\s*/gi,        'FLAT '],     // "Flat No. 7"
-  [/\bGATA\s+NO\.?\s*/gi,        'GATA '],     // "Gata No. 123"
-  [/\bKHATA\s+NO\.?\s*/gi,       'KHATA '],    // "Khata No. 45"
-  [/\bDOOR\s+NO\.?\s*/gi,        'HNO '],      // "Door No. 23"
-  [/\bUNIT\s+NO\.?\s*/gi,        'FLAT '],     // "Unit No. 4"
-  [/\bSY\.?\s*NO\.?\s*/gi,       'SURVEY '],   // "Sy. No." (South India)
-  [/\bRS\.?\s*NO\.?\s*/gi,       'SURVEY '],   // "RS No."
-  [/\bW\.?\s*DELHI\b/gi,         'WEST DELHI'],
-  [/\bN\.?\s*DELHI\b/gi,         'NORTH DELHI'],
-  [/\bS\.?\s*DELHI\b/gi,         'SOUTH DELHI'],
-  [/\bE\.?\s*DELHI\b/gi,         'EAST DELHI'],
-  [/\bEXTN\.?\b/gi,              'EXTENSION'],
-  [/\bVILG?\.?\b/gi,             'VILLAGE'],
-  [/\bMKT\.?\b/gi,               'MARKET'],
-  [/\bSOC\.?\b/gi,               'SOCIETY'],
-  [/\bAWHO\b/gi,                 'ARMY'],
-  [/\bRWA\b/gi,                  'RESIDENTS'],
-  // Directional abbreviations
-  [/\bPASCHIMI\b/gi,             'WEST'],
-  [/\bPOORVI\b/gi,               'EAST'],
-  [/\bUTTARI\b/gi,               'NORTH'],
-  [/\bDAKSHINI\b/gi,             'SOUTH'],
-];
-
-function preProcess(raw: string): string {
-  let s = raw.toUpperCase();
-  for (const [re, rep] of ABBREV_REPLACEMENTS) {
-    s = s.replace(re, rep);
-  }
-  return s.replace(/\s+/g, ' ').trim();
+export interface MatchResult {
+  confidence: number         // 0–100 percentage
+  reasons:    MatchSignal[]
+  dominant:   string         // which signal drove the match
 }
 
-// ─── Two-word locality patterns ──────────────────────────────────────────────
+// ── Ranking engine ────────────────────────────────────────────────────────────
 
-const TWO_WORD_LOCALITIES: Array<[RegExp, string]> = [
-  // North/West zones (Keshavpuram, Rohini, Narela, Civil Lines)
-  [/\bSHALIMAR\s+BAGH\b/g,         'SHALIMARBAGH'],
-  [/\bRANI\s+BAGH\b/g,              'RANIBAGH'],
-  [/\bKIRTI\s+NAGAR\b/g,           'KIRTINAGAR'],
-  [/\bASHOK\s+VIHAR\b/g,           'ASHOKVIHAR'],
-  [/\bPITAM\s+PURA\b/g,            'PITAMPURA'],
-  [/\bSHAKTI\s+NAGAR\b/g,          'SHAKTINAGAR'],
-  [/\bSADAR\s+BAZAR\b/g,           'SADARBAZAR'],
-  [/\bKAROL\s+BAGH\b/g,            'KAROLBAGH'],
-  [/\bPATEL\s+NAGAR\b/g,           'PATELNAGAR'],
-  [/\bRAJA\s+GARDEN\b/g,           'RAJAGARDEN'],
-  [/\bRAJOURI\s+GARDEN\b/g,        'RAJOURIGARDEN'],
-  [/\bPASCHIM\s+VIHAR\b/g,         'PASCHIMVIHAR'],
-  [/\bSUBHASH\s+NAGAR\b/g,         'SUBHASHNAGAR'],
-  [/\bTILAK\s+NAGAR\b/g,           'TILAKNAGAR'],
-  [/\bJANAK\s+PURI\b/g,            'JANAKPURI'],
-  [/\bVIKAS\s+PURI\b/g,            'VIKASPURI'],
-  [/\bUTTAM\s+NAGAR\b/g,           'UTTAMNAGAR'],
-  [/\bDWARKA\s+(?:SECTOR|SEC)/g,   'DWARKA'],
-  // South/Central zones
-  [/\bLAJPAT\s+NAGAR\b/g,          'LAJPATNAGAR'],
-  [/\bSARITA\s+VIHAR\b/g,          'SARITAVIHAR'],
-  [/\bMALVIYA\s+NAGAR\b/g,         'MALVIYANAGAR'],
-  [/\bGREATER\s+KAILASH\b/g,       'GREATERKAILASH'],
-  [/\bHAUZ\s+KHAS\b/g,             'HAUZKHAS'],
-  [/\bVASANT\s+KUNJ\b/g,           'VASANTKUNJ'],
-  [/\bVASANT\s+VIHAR\b/g,          'VASANTVIHAR'],
-  [/\bSAKET\s+(?:NAGAR|DIST)\b/g,  'SAKET'],
-  [/\bMEHRAULI\b/g,                'MEHRAULI'],
-  [/\bOKHLA\b/g,                   'OKHLA'],
-  // East/Shahdara zones
-  [/\bMAYUR\s+VIHAR\b/g,           'MAYURVIHAR'],
-  [/\bPREET\s+VIHAR\b/g,           'PREETVIHAR'],
-  [/\bVINOD\s+NAGAR\b/g,           'VINODNAGAR'],
-  [/\bMADHUR\s+VIHAR\b/g,          'MADHURVIHAR'],
-  [/\bANAND\s+VIHAR\b/g,           'ANANDVIHAR'],
-  [/\bYAMUNA\s+VIHAR\b/g,          'YAMUNAVIHAR'],
-  [/\bGANDHI\s+NAGAR\b/g,          'GANDHINAGAR'],
-  [/\bGEETA\s+COLONY\b/g,          'GEETACOLONY'],
-  [/\bPATPAR\s*GANJ\b/g,           'PATPARGANJ'],
-  [/\bLAXMI\s+NAGAR\b/g,           'LAXMINAGAR'],
-  [/\bDILSHAD\s+GARDEN\b/g,        'DILSHADGARDEN'],
-  [/\bVASUNDHARA\s+ENCLAVE\b/g,    'VASUNDHARAENCLAVE'],
-  [/\bNEW\s+FRIENDS\s+COLONY\b/g,  'NEWFRIENDCOLONY'],
-  [/\bFRIENDS\s+COLONY\b/g,        'FRIENDSCOLONY'],
-  [/\bEAST\s+OF\s+KAILASH\b/g,     'EASTOFKAILASH'],
-  [/\bJANGPURA\b/g,                'JANGPURA'],
-  [/\bKONDLI\b/g,                  'KONDLI'],
-  [/\bSHAHDARA\b/g,                'SHAHDARA'],
-  [/\bKARAWAL\s+NAGAR\b/g,         'KARAWALNAGAR'],
-  [/\bKARWAL\s+NAGAR\b/g,          'KARAWALNAGAR'],
-  [/\bBHAJAN\s+PURA\b/g,           'BHAJANPURA'],
-  [/\bSHASTRI\s+PARK\b/g,          'SHASTRIPARK'],
-  [/\bSHASTRI\s+NAGAR\b/g,         'SHASTRINAGAR'],
-  [/\bWELCOME\s+COLONY\b/g,        'WELCOMECOLONY'],
-  // North/Narela zones
-  [/\bNARELA\b/g,                  'NARELA'],
-  [/\bBAWANA\b/g,                  'BAWANA'],
-  [/\bALIAPUR\b/g,                 'ALIAPUR'],
-  // Rohini zone
-  [/\bROHINI\s+(?:SECTOR|SEC|EXT)\b/g, 'ROHINI'],
-  [/\bMANGOL\s+PURI\b/g,           'MANGOLPURI'],
-  [/\bSULTAN\s+PURI\b/g,           'SULTANPURI'],
-  [/\bBADLI\b/g,                   'BADLI'],
-  [/\bTAGORE\s+GARDEN\b/g,         'TAGOREGARDEN'],
-  // Najafgarh zone
-  [/\bNAJAFGARH\b/g,               'NAJAFGARH'],
-  [/\bDWARKA\b/g,                  'DWARKA'],
-  [/\bDICKSON\s+PURI\b/g,          'DICKSONPURI'],
-];
-
-// ─── Locality aliases ────────────────────────────────────────────────────────
-
-// Only canonical multi-character full-name aliases are kept.
-// Single-word fragments (ASHOK, VIKAS, GANDHI, PATEL…) are intentionally
-// REMOVED — they are far too common in Indian addresses outside Delhi and
-// were the primary driver of false-positive matches (e.g. "Ashok Estate,
-// Gurugram" → ASHOKVIHAR alias → locality hit → false CONFIRMED alert).
-const LOCALITY_ALIASES: Record<string, string> = {
-  // North/Keshavpuram
-  'SHALIMARBAGH':   'SHALIMARBAGH',
-  'RANIBAGH':       'RANIBAGH',
-  'KIRTINAGAR':     'KIRTINAGAR',
-  'ASHOKVIHAR':     'ASHOKVIHAR',
-  'PITAMPURA':      'PITAMPURA',
-  'SADARBAZAR':     'SADARBAZAR',
-  'KAROLBAGH':      'KAROLBAGH',
-  'PATELNAGAR':     'PATELNAGAR',
-  'RAJOURIGARDEN':  'RAJOURIGARDEN',
-  'PASCHIMVIHAR':   'PASCHIMVIHAR',
-  'SUBHASHNAGAR':   'SUBHASHNAGAR',
-  'TILAKNAGAR':     'TILAKNAGAR',
-  'JANAKPURI':      'JANAKPURI',
-  'VIKASPURI':      'VIKASPURI',
-  'UTTAMNAGAR':     'UTTAMNAGAR',
-  // South/Central
-  'LAJPATNAGAR':    'LAJPATNAGAR',
-  'SARITAVIHAR':    'SARITAVIHAR',
-  'MALVIYANAGAR':   'MALVIYANAGAR',
-  'HAUZKHAS':       'HAUZKHAS',
-  'VASANTKUNJ':     'VASANTKUNJ',
-  'VASANTVIHAR':    'VASANTVIHAR',
-  'SAKET':          'SAKET',
-  // East/Shahdara
-  'MAYURVIHAR':         'MAYURVIHAR',
-  'PREETVIHAR':         'PREETVIHAR',
-  'VINODNAGAR':         'VINODNAGAR',
-  'ANANDVIHAR':         'ANANDVIHAR',
-  'YAMUNAVIHAR':        'YAMUNAVIHAR',
-  'GANDHINAGAR':        'GANDHINAGAR',
-  'GEETACOLONY':        'GEETACOLONY',
-  'PATPARGANJ':         'PATPARGANJ',
-  'LAXMINAGAR':         'LAXMINAGAR',
-  'KONDLI':             'KONDLI',
-  'SHAHDARA':           'SHAHDARA',
-  'DILSHADGARDEN':      'DILSHADGARDEN',
-  'VASUNDHARAENCLAVE':  'VASUNDHARAENCLAVE',
-  'JANGPURA':           'JANGPURA',
-  'KARAWALNAGAR':       'KARAWALNAGAR',
-  'BHAJANPURA':         'BHAJANPURA',
-  'SHASTRINAGAR':       'SHASTRINAGAR',
-  'SHASTRIPARK':        'SHASTRIPARK',
-  'WELCOMECOLONY':      'WELCOMECOLONY',
-  // Rohini
-  'ROHINI':         'ROHINI',
-  'MANGOLPURI':     'MANGOLPURI',
-  'SULTANPURI':     'SULTANPURI',
-  'TAGOREGARDEN':   'TAGOREGARDEN',
-  'BADLI':          'BADLI',
-  // Other
-  'DWARKA':         'DWARKA',
-  'NARELA':         'NARELA',
-  'NAJAFGARH':      'NAJAFGARH',
-  'BAWANA':         'BAWANA',
-};
-
-// ─── Zone inference ──────────────────────────────────────────────────────────
-
-const ZONE_KEYWORDS: Record<string, string> = {
-  'KESHAVPURAM': 'Keshavpuram Zone',
-  'ROHINI':      'Rohini Zone',
-  'NARELA':      'Narela Zone',
-  'NAJAFGARH':   'Najafgarh Zone',
-  'SHAHDARA':    'Shahdara Zone',
-  'CIVIL':       'Civil Lines Zone',
-  'SOUTH':       'South Zone',
-  'CENTRAL':     'Central Zone',
-  'NORTH':       'North Zone',
-  'WEST':        'West Zone',
-  'EAST':        'Shahdara Zone',   // "EAST ZONE" in MCD = Shahdara
-};
-
-// Locality → zone (for cross-check when neither address mentions a zone explicitly)
-const LOCALITY_TO_ZONE: Record<string, string> = {
-  'SHALIMARBAGH':  'Keshavpuram Zone',
-  'KIRTINAGAR':    'Keshavpuram Zone',
-  'ASHOKVIHAR':    'Keshavpuram Zone',
-  'PITAMPURA':     'Rohini Zone',
-  'ROHINI':        'Rohini Zone',
-  'MANGOLPURI':    'Rohini Zone',
-  'SULTANPURI':    'Rohini Zone',
-  'KAROLBAGH':     'Central Zone',
-  'PATELNAGAR':    'Central Zone',
-  'SHASTRINAGAR':  'Central Zone',
-  'PASCHIMVIHAR':  'West Zone',
-  'JANAKPURI':     'West Zone',
-  'VIKASPURI':     'West Zone',
-  'UTTAMNAGAR':    'West Zone',
-  'DWARKA':        'South Zone',
-  'VASANTKUNJ':    'South Zone',
-  'HAUZKHAS':      'South Zone',
-  'SAKET':         'South Zone',
-  'LAJPATNAGAR':   'South Zone',
-  'SARITAVIHAR':   'South Zone',
-  'MALVIYANAGAR':  'South Zone',
-  'MAYURVIHAR':          'Shahdara Zone',
-  'PREETVIHAR':          'Shahdara Zone',
-  'SHAHDARA':            'Shahdara Zone',
-  'LAXMINAGAR':          'Shahdara Zone',
-  'PATPARGANJ':          'Shahdara Zone',
-  'KONDLI':              'Shahdara Zone',
-  'YAMUNAVIHAR':         'Shahdara Zone',
-  'BHAJANPURA':          'Shahdara Zone',
-  'GANDHINAGAR':         'Shahdara Zone',
-  'DILSHADGARDEN':       'Shahdara Zone',
-  'VASUNDHARAENCLAVE':   'Shahdara Zone',
-  'JANGPURA':            'South Zone',
-  'NARELA':        'Narela Zone',
-  'BAWANA':        'Narela Zone',
-  'NAJAFGARH':     'Najafgarh Zone',
-};
-
-// Parenthetical directional suffixes to strip from block names
-const DIRECTION_SUFFIXES = new Set([
-  'WEST', 'EAST', 'NORTH', 'SOUTH',
-  'PASCHIMI', 'POORVI', 'UTTARI', 'DAKSHINI', 'DAKSHHINI',
-]);
-
-// ─── Core extraction functions ───────────────────────────────────────────────
-
-/**
- * Generic tokeniser — strips stop-words and short/trivial tokens.
- * Used in matchCase() for broad locality-word overlap.
- */
-function tokenise(address: string): string[] {
-  const words = preProcess(address)
-    .replace(/[^\w\s\/\-]/g, ' ')
-    .split(/\s+/);
-  return [...new Set(
-    words.filter(w => {
-      if (w.length < 3) return false;
-      if (STOP.has(w)) return false;
-      if (/^\d+$/.test(w) && w.length < 5) return false;
-      return true;
-    }),
-  )].slice(0, 15);
-}
-
-/**
- * Lighter tokeniser for live checkAddress() — keeps more numeric and structural tokens.
- */
-function lightTokenise(address: string): string[] {
-  const words = preProcess(address)
-    .replace(/[^\w\s\/\-]/g, ' ')
-    .split(/\s+/);
-  return [...new Set(
-    words.filter(w => {
-      if (w.length < 2) return false;
-      if (LIGHT_STOP.has(w)) return false;
-      if (/^\d+$/.test(w)) return w.length >= 2;
-      return true;
-    }),
-  )].slice(0, 18);
-}
-
-/**
- * Extract ALL types of property identifiers:
- *   - Alphanumeric codes:  G-91, RZ-11C, BT-57, C-7/8
- *   - Keyword-prefixed:    Plot No. 57, H. No. 234, Khasra No. 812/4
- *   - Standalone numbers:  234, 812, 57  (2-6 digits)
- *   - Khasra fractions:    812/4, 1213/2/3 — kept intact AND base extracted
- */
-function extractPlotNumbers(address: string): string[] {
-  const upper = preProcess(address).replace(/[^\w\s\/\-\.]/g, ' ');
-  const found = new Set<string>();
-
-  // Letter-starting alphanumeric codes: "G-91", "RZ-11C", "BT-57", "M-24"
-  for (const m of upper.matchAll(/\b([A-Z]{1,3}[-\/]\d+[A-Z]?(?:[-\/]\d+)?)\b/g))
-    found.add(m[1]);
-
-  // Digit-letter suffix codes: "24-B", "234-C", "57/A", "24/B-1"
-  // Very common in DDA / MCD numbering (flat or house number with suffix)
-  for (const m of upper.matchAll(/\b(\d{1,5}[-\/][A-Z]\d*(?:[-\/]\d+)?)\b/g)) {
-    found.add(m[1]);
-    found.add(m[1].split(/[-\/]/)[0]); // base number
-  }
-
-  // Keyword-prefixed numbers: "Plot No. 57", "H.No. 234", "Khasra 812/4", "Flat 24-B"
-  for (const m of upper.matchAll(
-    /(?:HNO|PLOT|KHASRA|KHATA|GATA|SURVEY|FLAT|SHOP|DOOR|UNIT)\s+(\d+(?:[\/\-]\d+)?(?:[\/\-][A-Z\d]+)?)/g,
-  )) {
-    found.add(m[1]);
-    const base = m[1].split(/[\/\-]/)[0];
-    if (base !== m[1]) found.add(base);
-  }
-
-  // Standalone 2-6 digit numbers (catches plot numbers without any prefix)
-  for (const m of upper.matchAll(/\b(\d{2,6})\b/g)) {
-    if (m[1].length <= 6) found.add(m[1]);
-  }
-
-  return [...found].slice(0, 18);
-}
-
-/**
- * Synthesise compound block-plot codes from addresses that spell out components
- * separately.
- *
- * Handles:
- *   "Block BT (Paschimi), Plot No. 57"         → ["BT-57"]
- *   "Block C, H. No. 234, Sector 12"           → ["C-234"]
- *   "RZ Block, Plot 45-B, Uttam Nagar"         → ["RZ-45"]
- *   "Block 12-A, Flat 7, DDA"                  → ["12-7"] (less common, still extracted)
- */
-function extractBlockPlotCodes(address: string): string[] {
-  const upper = preProcess(address)
-    .replace(/\(([A-Z]+)\)/g, (_, w) => DIRECTION_SUFFIXES.has(w) ? ' ' : ` ${w} `)
-    .replace(/[^\w\s\/\-]/g, ' ');
-  const found = new Set<string>();
-
-  // Decode compact DB-style codes: "BT-57", "RZ-11C", "GH-6-C" → compound codes directly.
-  // MCD database records often omit "Block" / "Plot" keywords and use this shorthand.
-  for (const m of upper.matchAll(/\b([A-Z]{1,4})-(\d+[A-Z]?(?:[-\/]\d+)?)\b/g)) {
-    if (!DIRECTION_SUFFIXES.has(m[1])) {
-      const pn = m[2];
-      found.add(`${m[1]}-${pn}`);
-      const base = pn.split(/[-\/]/)[0];
-      if (base !== pn) found.add(`${m[1]}-${base}`);
-    }
-  }
-
-  // Collect block identifiers (strip parenthetical direction words)
-  const blocks: string[] = [];
-  for (const m of upper.matchAll(/\bBLOCK\s+([A-Z]{1,4})\b/g)) {
-    if (!DIRECTION_SUFFIXES.has(m[1])) blocks.push(m[1]);
-  }
-
-  // Collect plot / house numbers
-  const plots: string[] = [];
-  for (const m of upper.matchAll(
-    /(?:PLOT|HNO|KHASRA)\s+(\d+(?:[\/\-]\d+)?(?:[\/\-][A-Z\d]+)?)/g,
-  )) plots.push(m[1]);
-
-  // If no explicit plot keyword, fall back to short standalone numbers in same address
-  if (blocks.length > 0 && plots.length === 0) {
-    for (const m of upper.matchAll(/\b(\d{1,4})\b/g)) {
-      if (parseInt(m[1]) > 0) plots.push(m[1]);
-    }
-  }
-
-  for (const b of blocks) {
-    for (const p of plots) {
-      found.add(`${b}-${p}`);
-      const base = p.split(/[\/\-]/)[0];
-      if (base !== p) found.add(`${b}-${base}`);
-    }
-  }
-
-  return [...found].slice(0, 8);
-}
-
-/**
- * Synthesise Pocket + Sector compound codes.
- *
- * DDA housing patterns:
- *   "Pocket A, Sector 8, Dwarka"        → ["A-8"]
- *   "Flat F-56, Pocket B, Sector 12"    → ["B-12"]
- *   "Pocket-3, Sector-11, Rohini"       → ["3-11"]
- */
-function extractPocketSectorCodes(address: string): string[] {
-  const upper = preProcess(address).replace(/[^\w\s\-\/]/g, ' ');
-  const found = new Set<string>();
-
-  const pockets: string[] = [];
-  // Handle "Pocket J & K", "Pocket J AND K", "Pocket J-K", "Pocket J"
-  for (const m of upper.matchAll(/\bPOCKET\s*[-]?\s*([A-Z\d]+)(?:\s*(?:AND|&|\-)\s*([A-Z\d]+))?/g)) {
-    pockets.push(m[1]);
-    if (m[2]) pockets.push(m[2]);
-  }
-
-  const sectors: string[] = [];
-  for (const m of upper.matchAll(/\bSECTOR\s*[-]?\s*(\d+)\b/g))
-    sectors.push(m[1]);
-
-  for (const p of pockets)
-    for (const s of sectors)
-      found.add(`${p}-${s}`);
-
-  // "Flat X, Sector Y" (rare but present in DDA records)
-  for (const m of upper.matchAll(/\bFLAT\s+([A-Z])\b.{1,40}?\bSECTOR\s+(\d+)\b/g))
-    found.add(`${m[1]}-${m[2]}`);
-
-  return [...found].slice(0, 6);
-}
-
-/**
- * Extract part / phase numbers from an address (used as disambiguation bonus
- * when the locality also matches).
- *
- * Patterns:
- *   "Lajpat Nagar Part-II"    → "2"
- *   "Lajpat Nagar-2"          → "2"
- *   "Phase III Extension"     → "3"
- *   "Extension-1"             → "1"
- */
-function extractPartNumbers(address: string): string[] {
-  const upper = preProcess(address).replace(/[^\w\s\-]/g, ' ');
-  const found = new Set<string>();
-
-  for (const m of upper.matchAll(
-    /\b(?:PART|PHASE|EXT|EXTENSION)\s*[-]?\s*([IVX]+|\d+)\b/g,
-  )) {
-    const n = romanToNumber(m[1]);
-    found.add(n !== null ? String(n) : m[1]);
-  }
-
-  // "NAGAR-2", "BAGH-1", "VIHAR-3" trailing numeral
-  for (const m of upper.matchAll(
-    /\b(?:NAGAR|BAGH|VIHAR|ENCLAVE|PARK|COLONY|MARG|ROAD)\s*[-]\s*(\d+|[IVX]+)\b/g,
-  )) {
-    const n = romanToNumber(m[1]);
-    found.add(n !== null ? String(n) : m[1]);
-  }
-
-  return [...found].slice(0, 4);
-}
-
-/** Canonical two-word locality tokens (e.g. SHALIMARBAGH). */
-function extractTwoWordLocalities(address: string): string[] {
-  const upper = address.toUpperCase();
-  const found: string[] = [];
-  for (const [re, canonical] of TWO_WORD_LOCALITIES) {
-    re.lastIndex = 0;
-    if (re.test(upper)) found.push(canonical);
-  }
-  return found;
-}
-
-/** Build a set of canonical locality tokens from an address. */
-function localityTokens(address: string): Set<string> {
-  const upper = preProcess(address);
-  const out = new Set<string>();
-
-  for (const t of extractTwoWordLocalities(address)) out.add(t);
-
-  for (const [variant, canonical] of Object.entries(LOCALITY_ALIASES)) {
-    if (upper.includes(variant)) out.add(canonical);
-  }
-
-  for (const w of upper.replace(/[^\w\s]/g, ' ').split(/\s+/)) {
-    if (w.length >= 5 && !STOP.has(w) && !/^\d+$/.test(w)) out.add(w);
-  }
-
-  return out;
-}
-
-/** Infer MCD zone from address text + locality → zone mapping. */
-function inferZone(address: string): string | null {
-  const upper = preProcess(address);
-
-  for (const [kw, zone] of Object.entries(ZONE_KEYWORDS)) {
-    if (upper.includes(kw)) return zone;
-  }
-
-  // Fall back via locality tokens
-  for (const loc of localityTokens(address)) {
-    const z = LOCALITY_TO_ZONE[loc];
-    if (z) return z;
-  }
-
-  return null;
-}
-
-/**
- * True when two plot / khasra identifiers refer to the same property.
- * "812" ≅ "812/4", "45" ≅ "45-B", "45" ≅ "45A"
- */
-function plotCompatible(a: string, b: string): boolean {
+function codesCompatible(a: string | null, b: string | null): boolean {
+  if (!a || !b) return false;
   if (a === b) return true;
-  const base = (s: string) => s.replace(/[\/\-][A-Z\d]+$/, '');
-  const aBase = base(a);
-  const bBase = base(b);
-  return aBase === bBase || aBase === b || bBase === a;
+  // "BT-57" ≅ "BT57" ≅ "57-BT"
+  const norm = (s: string) => s.replace(/[-\/\s]/g, '').toUpperCase();
+  return norm(a) === norm(b);
 }
 
-/**
- * True when any compound code from `codes` appears as a token or substring
- * in `address` (handles both compact "BT-57" form and split "BT 57" form).
- */
-function compoundCodeHit(codes: string[], address: string): boolean {
-  if (codes.length === 0) return false;
-  const upper = address.toUpperCase().replace(/[^\w\s\/\-]/g, ' ');
-  const tokens = new Set(upper.split(/\s+/));
-  const noSpace = upper.replace(/\s+/g, '');
-  return codes.some(c => {
-    if (tokens.has(c)) return true;
-    if (noSpace.includes(c.replace(/\-/g, ''))) return true;
-    // Also match space-separated form: code "BT-57" matches "BT 57" in DB address
-    const parts = c.split('-');
-    if (parts.length === 2 && /^[A-Z]+$/.test(parts[0]) && /^\d/.test(parts[1])) {
-      const re = new RegExp(`\\b${parts[0]}\\s+${parts[1]}\\b`);
-      if (re.test(upper)) return true;
-    }
-    return false;
+function numsCompatible(a: string | null, b: string | null): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  // "812" ≅ "812/4" — base match
+  const base = (s: string) => s.split(/[\/\-]/)[0];
+  return base(a) === base(b) || base(a) === b || a === base(b);
+}
+
+function ownerSurnameMatch(a: string | null, b: string | null): boolean {
+  if (!a || !b) return false;
+  const words = (s: string) => s.toUpperCase().split(/\s+/).filter(w => w.length >= 3);
+  const aw = words(a); const bw = words(b);
+  if (aw.length === 0 || bw.length === 0) return false;
+  // Last word is most often surname
+  return aw[aw.length - 1] === bw[bw.length - 1];
+}
+
+function rankMatch(
+  caseN:  NormalizedAddress,
+  dbN:    NormalizedAddress,
+  caseOwner: string | null,
+  dbOwner:   string | null,
+): MatchResult {
+  const signals: MatchSignal[] = [];
+  let score = 0;
+
+  // 1. Block + Plot compound code  (30%)
+  const codeHit = codesCompatible(caseN.blockPlotCode, dbN.blockPlotCode)
+               || codesCompatible(caseN.pocketSectorCode, dbN.pocketSectorCode);
+  const codeContrib = codeHit ? WEIGHTS.blockPlotCode : 0;
+  score += codeContrib;
+  signals.push({
+    signal: 'Block + Plot Code', weight: WEIGHTS.blockPlotCode,
+    matched: codeHit, contribution: codeContrib,
+    detail: codeHit ? `${caseN.blockPlotCode ?? caseN.pocketSectorCode}` : undefined,
   });
+
+  // 2. Locality  (25%)
+  const locHit = !!caseN.locality && caseN.locality === dbN.locality;
+  const locContrib = locHit ? WEIGHTS.locality : 0;
+  score += locContrib;
+  signals.push({
+    signal: 'Locality', weight: WEIGHTS.locality,
+    matched: locHit, contribution: locContrib,
+    detail: locHit ? caseN.locality! : undefined,
+  });
+
+  // 3. Plot / House number  (15%)
+  const plotHit = numsCompatible(caseN.plotNo, dbN.plotNo)
+               || numsCompatible(caseN.houseNo, dbN.houseNo)
+               || numsCompatible(caseN.khasra,  dbN.khasra);
+  const plotContrib = plotHit ? WEIGHTS.plotNo : 0;
+  score += plotContrib;
+  signals.push({
+    signal: 'Plot / House Number', weight: WEIGHTS.plotNo,
+    matched: plotHit, contribution: plotContrib,
+    detail: plotHit ? (caseN.plotNo ?? caseN.houseNo ?? caseN.khasra ?? undefined) : undefined,
+  });
+
+  // 4. Block letter  (10%)
+  const blockHit = !!caseN.block && caseN.block === dbN.block;
+  const blockContrib = blockHit ? WEIGHTS.block : 0;
+  score += blockContrib;
+  signals.push({
+    signal: 'Block', weight: WEIGHTS.block,
+    matched: blockHit, contribution: blockContrib,
+    detail: blockHit ? caseN.block! : undefined,
+  });
+
+  // 5. Pincode  (8%)
+  const pinHit = !!caseN.pincode && caseN.pincode === dbN.pincode;
+  const pinContrib = pinHit ? WEIGHTS.pincode : 0;
+  score += pinContrib;
+  signals.push({
+    signal: 'Pincode', weight: WEIGHTS.pincode,
+    matched: pinHit, contribution: pinContrib,
+    detail: pinHit ? caseN.pincode! : undefined,
+  });
+
+  // 6. Owner surname  (7%)
+  const ownerHit = ownerSurnameMatch(caseOwner, dbOwner);
+  const ownerContrib = ownerHit ? WEIGHTS.ownerSurname : 0;
+  score += ownerContrib;
+  signals.push({
+    signal: 'Owner Name', weight: WEIGHTS.ownerSurname,
+    matched: ownerHit, contribution: ownerContrib,
+  });
+
+  // 7. Zone  (5%)
+  const zoneHit = !!caseN.zone && caseN.zone === dbN.zone;
+  const zoneContrib = zoneHit ? WEIGHTS.zone : 0;
+  score += zoneContrib;
+  signals.push({
+    signal: 'Zone', weight: WEIGHTS.zone,
+    matched: zoneHit, contribution: zoneContrib,
+    detail: zoneHit ? caseN.zone! : undefined,
+  });
+
+  // ── Penalties ──
+
+  // Locality mismatch: both have a clear locality but they differ
+  const locMismatch = !!caseN.locality && !!dbN.locality && caseN.locality !== dbN.locality;
+  const locPenalty  = locMismatch ? WEIGHTS.localityMismatch : 0;
+  score += locPenalty;
+  if (locMismatch) {
+    signals.push({
+      signal: 'Locality Mismatch', weight: WEIGHTS.localityMismatch,
+      matched: true, contribution: locPenalty,
+      detail: `${caseN.locality} ≠ ${dbN.locality}`,
+    });
+  }
+
+  // Zone mismatch: both have a zone but they differ
+  const zoneMismatch = !!caseN.zone && !!dbN.zone && caseN.zone !== dbN.zone;
+  const zonePenalty  = zoneMismatch ? WEIGHTS.zoneMismatch : 0;
+  score += zonePenalty;
+  if (zoneMismatch) {
+    signals.push({
+      signal: 'Zone Mismatch', weight: WEIGHTS.zoneMismatch,
+      matched: true, contribution: zonePenalty,
+      detail: `${caseN.zone} ≠ ${dbN.zone}`,
+    });
+  }
+
+  // Hard cap: code signal without locality anchor → max 30
+  const hasCode   = codeHit || plotHit;
+  const hasLocality = locHit;
+  if (hasCode && !hasLocality) {
+    score = Math.min(score, 30);
+  }
+
+  const confidence = Math.min(100, Math.max(0, Math.round(score)));
+
+  // Dominant signal
+  let dominant = 'PARTIAL';
+  if (codeHit)  dominant = 'COMPOUND_CODE';
+  else if (locHit && plotHit) dominant = 'LOCALITY_PLOT';
+  else if (locHit)  dominant = 'LOCALITY';
+  else if (plotHit) dominant = 'PLOT_NUMBER';
+  else if (pinHit)  dominant = 'PINCODE';
+
+  return { confidence, reasons: signals, dominant };
 }
 
-/** Token overlap between two sets (Jaccard numerator). */
-function tokenOverlap(setA: Set<string>, setB: Set<string>): number {
-  return [...setA].filter(t => setB.has(t)).length;
-}
-
-// ─── Service ─────────────────────────────────────────────────────────────────
+// ── Service ───────────────────────────────────────────────────────────────────
 
 @Injectable()
-export class DemolitionService {
+export class DemolitionService implements OnModuleInit {
+  private readonly logger = new Logger(DemolitionService.name);
+
+  // Alias cache — loaded once at startup, invalidated when admin updates table
+  private aliasMap: Map<string, string> = new Map();
+  private aliasLoadedAt = 0;
+  private readonly ALIAS_TTL_MS = 10 * 60 * 1000; // 10 min
+
   constructor(private readonly prisma: PrismaService) {}
 
-  // ── Stats & analytics ────────────────────────────────────────────────────────
+  async onModuleInit() {
+    await this.loadAliases();
+  }
+
+  private async loadAliases(): Promise<Map<string, string>> {
+    const now = Date.now();
+    if (now - this.aliasLoadedAt < this.ALIAS_TTL_MS && this.aliasMap.size > 0) {
+      return this.aliasMap;
+    }
+    const rows = await this.prisma.addressAlias.findMany({
+      select: { alias: true, canonical: true },
+    });
+    this.aliasMap = new Map(rows.map(r => [r.alias.toUpperCase(), r.canonical.toUpperCase()]));
+    this.aliasLoadedAt = now;
+    this.logger.log(`Loaded ${this.aliasMap.size} address aliases`);
+    return this.aliasMap;
+  }
+
+  // Invalidate alias cache (called after admin updates aliases)
+  invalidateAliasCache() {
+    this.aliasLoadedAt = 0;
+  }
+
+  // ── Candidate retrieval via pg_trgm ──────────────────────────────────────────
+  //
+  // Uses GIN trigram index: fast over 150k rows (<50ms).
+  // Returns top 25 candidates — enough coverage, avoids scanning everything.
+
+  private async searchCandidates(n: NormalizedAddress): Promise<any[]> {
+    if (!n.isDelhi) return [];
+
+    type Row = {
+      id: string; address: string; zone: string | null; locality: string | null;
+      ownerName: string | null; noticeDate: Date; noticeNumber: string | null;
+      bookingId: string | null;
+    };
+
+    const found = new Map<string, Row>();
+
+    // Pass 1: compound code exact search (highest precision)
+    if (n.blockPlotCode || n.pocketSectorCode) {
+      const codes = [n.blockPlotCode, n.pocketSectorCode].filter(Boolean) as string[];
+      for (const code of codes) {
+        const rows = await this.prisma.$queryRawUnsafe<Row[]>(
+          `SELECT id, address, zone, locality, "ownerName", "noticeDate", "noticeNumber", "bookingId"
+           FROM demolition_properties
+           WHERE address ILIKE $1 LIMIT 30`,
+          `%${code}%`,
+        );
+        for (const r of rows) found.set(r.id, r);
+      }
+    }
+
+    // Pass 2: trgm similarity on canonical form (uses GIN index)
+    if (n.canonical && n.canonical.length >= 6) {
+      const rows = await this.prisma.$queryRawUnsafe<Row[]>(
+        `SELECT id, address, zone, locality, "ownerName", "noticeDate", "noticeNumber", "bookingId"
+         FROM demolition_properties
+         WHERE address % $1
+         ORDER BY similarity(address, $1) DESC
+         LIMIT 25`,
+        n.canonical,
+      );
+      for (const r of rows) if (!found.has(r.id)) found.set(r.id, r);
+    }
+
+    // Pass 3: locality AND plot number AND-search (pins false positives)
+    if (n.locality && (n.plotNo || n.houseNo)) {
+      const num = n.plotNo ?? n.houseNo ?? '';
+      const rows = await this.prisma.$queryRawUnsafe<Row[]>(
+        `SELECT id, address, zone, locality, "ownerName", "noticeDate", "noticeNumber", "bookingId"
+         FROM demolition_properties
+         WHERE address ILIKE $1 AND address ILIKE $2
+         LIMIT 20`,
+        `%${n.locality}%`, `%${num}%`,
+      );
+      for (const r of rows) if (!found.has(r.id)) found.set(r.id, r);
+    }
+
+    // Pass 4: pincode search (high-precision geographic filter)
+    if (n.pincode && found.size < 25) {
+      const rows = await this.prisma.$queryRawUnsafe<Row[]>(
+        `SELECT id, address, zone, locality, "ownerName", "noticeDate", "noticeNumber", "bookingId"
+         FROM demolition_properties
+         WHERE address ILIKE $1 LIMIT 15`,
+        `%${n.pincode}%`,
+      );
+      for (const r of rows) if (!found.has(r.id)) found.set(r.id, r);
+    }
+
+    return [...found.values()].slice(0, 50);
+  }
+
+  // ── Stats ─────────────────────────────────────────────────────────────────────
 
   async getStats() {
     const [total, zoneRows, yearRows, recentAlerts, matchedCases] =
@@ -664,38 +328,30 @@ export class DemolitionService {
           SELECT zone, COUNT(*) AS count
           FROM demolition_properties
           WHERE zone IS NOT NULL
-          GROUP BY zone
-          ORDER BY count DESC
+          GROUP BY zone ORDER BY count DESC
         `,
         this.prisma.$queryRaw<{ year: string; count: bigint }[]>`
           SELECT TO_CHAR("noticeDate", 'YYYY') AS year, COUNT(*) AS count
           FROM demolition_properties
           WHERE EXTRACT(YEAR FROM "noticeDate") BETWEEN 2007 AND 2026
-          GROUP BY year
-          ORDER BY year ASC
+          GROUP BY year ORDER BY year ASC
         `,
-        this.prisma.demolitionAlert.count({
-          where: { matchStatus: { not: 'DISMISSED' } },
-        }),
-        this.prisma.demolitionAlert.count({
-          where: { matchStatus: 'CONFIRMED' },
-        }),
+        this.prisma.demolitionAlert.count({ where: { matchStatus: { not: 'DISMISSED' } } }),
+        this.prisma.demolitionAlert.count({ where: { matchStatus: 'CONFIRMED' } }),
       ]);
 
     return {
       total,
       matchedCases,
       recentAlerts,
-      zones: zoneRows.map(r => ({ zone: r.zone, count: Number(r.count) })),
+      zones:     zoneRows.map(r => ({ zone: r.zone, count: Number(r.count) })),
       yearTrend: yearRows.map(r => ({ year: r.year, count: Number(r.count) })),
     };
   }
 
-  // ── List / search demolition properties ─────────────────────────────────────
+  // ── List / search demolition properties ──────────────────────────────────────
 
-  async findAll(query: {
-    search?: string; zone?: string; page?: number; limit?: number;
-  }) {
+  async findAll(query: { search?: string; zone?: string; page?: number; limit?: number }) {
     const page  = Math.max(1, Number(query.page ?? 1));
     const limit = Math.min(100, Math.max(1, Number(query.limit ?? 50)));
     const skip  = (page - 1) * limit;
@@ -713,9 +369,7 @@ export class DemolitionService {
 
     const [data, total] = await Promise.all([
       this.prisma.demolitionProperty.findMany({
-        where,
-        skip,
-        take: limit,
+        where, skip, take: limit,
         orderBy: { noticeDate: 'desc' },
         select: {
           id: true, bookingId: true, noticeNumber: true, noticeDate: true,
@@ -729,305 +383,59 @@ export class DemolitionService {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  // ── Score a candidate pair ───────────────────────────────────────────────────
-  //
-  // Centralised scorer used by BOTH matchCase() and checkAddress().
-  // Scores are additive and capped at 100.
-  //
-  //  Signal                           Max   Notes
-  //  ──────────────────────────────  ────  ──────────────────────────────────
-  //  Compound block-plot code         40   "Block BT + Plot 57" → "BT-57"
-  //  Standalone alphanumeric code     35   "G-91", "RZ-11C" found in both
-  //  Pocket + sector code             28   "Pocket A + Sector 8" → "A-8"
-  //  Plot / house number (exact)      22   same number, prefix-compatible
-  //  Plot / house number (partial)    12   base number match (812 ≅ 812/4)
-  //  Two-word locality canonical      15   SHALIMARBAGH in both
-  //  Single-word locality alias       8    SHALIMAR → SHALIMARBAGH
-  //  Part / phase number bonus        8    "Part II" = "2" AND locality matches
-  //  Owner name (last name)           10   distinctive surname token match
-  //  Owner name (partial)             5    any name token match
-  //  Zone inference                   6    same MCD zone (inferred or explicit)
-  //  General token overlap            15   Jaccard of locality/area words
-
-  private scoreAddressPair(
-    caseAddr:  string,
-    dbAddr:    string,
-    caseOwner: string | null,
-    dbOwner:   string | null,
-    dbZone:    string | null,
-  ): {
-    score: number;
-    reason: string;
-    detail: Record<string, number | boolean | string[]>;
-  } {
-    const detail: Record<string, number | boolean | string[]> = {};
-
-    // ── Prepare signals from both addresses ──
-    const caseCompound  = extractBlockPlotCodes(caseAddr);
-    const dbCompound    = extractBlockPlotCodes(dbAddr);
-    const casePocket    = extractPocketSectorCodes(caseAddr);
-    const dbPocket      = extractPocketSectorCodes(dbAddr);
-    const casePlots     = extractPlotNumbers(caseAddr);
-    const dbPlots       = extractPlotNumbers(dbAddr);
-    const caseParts     = extractPartNumbers(caseAddr);
-    const dbParts       = extractPartNumbers(dbAddr);
-    const caseLocality  = localityTokens(caseAddr);
-    const dbLocality    = localityTokens(dbAddr);
-    const caseToks      = new Set(tokenise(caseAddr));
-    const dbToks        = new Set(tokenise(dbAddr));
-    const caseZone    = inferZone(caseAddr);
-    // Prefer zone inferred from DB address TEXT over the stored zone field —
-    // MCD raw data has significant zone classification errors (e.g., Karol Bagh
-    // records stored under "Shahdara Zone"). Text inference is more reliable.
-    const inferredDbZone  = inferZone(dbAddr);
-    const effectiveDbZone = inferredDbZone ?? dbZone;
-
-    // 1. Compound block-plot code (0-40)
-    // Case: "Block BT + Plot 57" → "BT-57"; DB has "BT-57" as token → exact hit
-    // Also handles DB entries that have compound codes that we can reverse-match
-    const codeHit = compoundCodeHit(caseCompound, dbAddr)
-                 || compoundCodeHit(dbCompound, caseAddr)
-                 || (caseCompound.length > 0 && dbCompound.some(d => caseCompound.includes(d)));
-    const codeScore = codeHit ? 40 : 0;
-    detail.compoundCode = codeHit;
-    detail.caseCompound = caseCompound;
-
-    // 2. Standalone alphanumeric code (0-35)
-    // Covers both LETTER-digit ("G-91", "BT-57") and digit-LETTER ("24-B", "234-C") formats.
-    // Digit-letter suffix codes are very common in DDA/MCD flat numbering.
-    const isAlphaNum = (p: string) =>
-      (/^[A-Z]/.test(p) && /\d/.test(p)) || /^\d+[-\/][A-Z]/.test(p);
-    const caseAlpha = casePlots.filter(isAlphaNum);
-    const dbAlpha   = dbPlots.filter(isAlphaNum);
-    const alphaHits = caseAlpha.filter(a => dbAlpha.some(d => plotCompatible(a, d)));
-    // Also check if any case alpha code appears as token in DB and vice versa
-    const alphaInDb  = caseAlpha.filter(a => compoundCodeHit([a], dbAddr));
-    const alphaInCase = dbAlpha.filter(a => compoundCodeHit([a], caseAddr));
-    const allAlphaHits = new Set([...alphaHits.map(h => h), ...alphaInDb, ...alphaInCase]);
-    const alphaScore = Math.min(35, allAlphaHits.size * 35);
-    detail.alphaCodeHits = [...allAlphaHits];
-
-    // 3. Pocket + sector code (0-28)
-    const pocketHits = casePocket.filter(p => dbPocket.some(d => d === p));
-    // Also check if pocket code appears literally in DB address
-    const pocketInDb = casePocket.filter(p => compoundCodeHit([p], dbAddr));
-    const allPocketHits = new Set([...pocketHits, ...pocketInDb]);
-    const pocketScore = Math.min(28, allPocketHits.size * 28);
-    detail.pocketSectorHits = [...allPocketHits];
-
-    // 4. Plot / house / khasra number match (0-22)
-    const casePureNums = casePlots.filter(p => /^\d+/.test(p));
-    const dbPureNums   = dbPlots.filter(p => /^\d+/.test(p));
-    const exactPlotHits    = casePureNums.filter(n => dbPureNums.some(d => n === d));
-    const compatPlotHits   = casePureNums.filter(n => dbPureNums.some(d => plotCompatible(n, d)));
-    const plotScore = exactPlotHits.length > 0
-      ? Math.min(22, exactPlotHits.length * 22)
-      : Math.min(12, compatPlotHits.length * 12);
-    detail.matchedPlots = exactPlotHits.length > 0 ? exactPlotHits : compatPlotHits;
-
-    // 5. Locality match (0-15 for two-word canonical, 0-8 for single-word alias)
-    const localityOverlap = [...caseLocality].filter(l => dbLocality.has(l));
-    const twoWordHits  = localityOverlap.filter(l => l.length >= 8);  // canonical ≥ 8 chars
-    const singleHits   = localityOverlap.filter(l => l.length < 8);
-    const localityScore = Math.min(15, twoWordHits.length * 15) + Math.min(8, singleHits.length * 8);
-    detail.localityHits = localityOverlap;
-
-    // 6. Part / phase number bonus (0-8) — only fires when locality also matches
-    const partHits = caseParts.filter(p => dbParts.includes(p));
-    const partScore = (localityOverlap.length > 0 && partHits.length > 0) ? 8 : 0;
-    detail.partHits = partHits;
-
-    // 7. Owner name match (0-10 / 0-5)
-    let ownerScore = 0;
-    if (caseOwner && dbOwner) {
-      const cWords = caseOwner.toUpperCase().split(/\s+/).filter(w => w.length >= 3);
-      const dWords = dbOwner.toUpperCase().split(/\s+/).filter(w => w.length >= 3);
-      if (cWords.length > 0 && dWords.length > 0) {
-        // Last name of longer name vs all tokens (last names most distinctive)
-        const caseLast = cWords[cWords.length - 1];
-        const dbLast   = dWords[dWords.length - 1];
-        if (caseLast === dbLast) {
-          ownerScore = 10;
-        } else {
-          const hits = cWords.filter(w => dWords.includes(w)).length;
-          ownerScore = hits > 0 ? Math.round((hits / Math.max(cWords.length, dWords.length)) * 5) : 0;
-        }
-      }
-    }
-    detail.ownerScore = ownerScore;
-
-    // 8. Zone match (0-8)
-    let zoneScore = 0;
-    if (caseZone && effectiveDbZone) {
-      zoneScore = caseZone === effectiveDbZone ? 8 : 0;
-    } else if (caseZone && dbZone && !inferredDbZone) {
-      // Stored zone only (no text inference possible) — lower confidence
-      zoneScore = dbZone.toLowerCase().includes(caseZone.split(' ')[0].toLowerCase()) ? 4 : 0;
-    }
-    detail.zoneScore = zoneScore;
-
-    // 9. General token overlap (0-15)
-    const overlap    = tokenOverlap(caseToks, dbToks);
-    const tokenScore = Math.round((overlap / Math.max(caseToks.size, dbToks.size, 1)) * 15);
-    detail.tokenOverlap = overlap;
-
-    // 10. Sub-number inside compact DB code (0-20)
-    // Catches "case plot=57 + locality=SHALIMARBAGH" vs DB "BT-57 Shalimar Bagh"
-    // Only fires when no stronger code signal already matched
-    let subNumScore = 0;
-    if (codeScore === 0 && alphaScore === 0) {
-      const dbCompactNums = [...dbAddr.toUpperCase().matchAll(/\b[A-Z]{1,4}-(\d+)\b/g)].map(m => m[1]);
-      const caseNums = casePlots.filter(p => /^\d+$/.test(p));
-      const subHits = caseNums.filter(n => dbCompactNums.some(d => plotCompatible(n, d)));
-      if (subHits.length > 0 && localityOverlap.length > 0) {
-        subNumScore = 20;
-      }
-    }
-    detail.subNumScore = subNumScore;
-
-    // 11. Locality mismatch penalty (0 or negative)
-    // Without a locality anchor any plot number ("225", "57") can appear in
-    // thousands of Delhi records and produces noise. Penalise heavily.
-    let localityPenalty = 0;
-    if (caseLocality.size >= 1 && localityOverlap.length === 0 && dbLocality.size >= 1) {
-      localityPenalty = -50;   // was -32 — stronger to kill cross-locality false positives
-    }
-    detail.localityPenalty = localityPenalty;
-
-    // 12. Zone mismatch penalty (0 or negative)
-    // Karol Bagh (Central Zone) must not match Dilshad Garden (Shahdara Zone).
-    let zonePenalty = 0;
-    if (caseZone && effectiveDbZone && caseZone !== effectiveDbZone) {
-      zonePenalty = -35;   // was -22 — stronger cross-zone barrier
-    }
-    detail.zonePenalty = zonePenalty;
-
-    // 13. Hard cap: code signal without locality anchor
-    // An alpha/compound code alone (e.g. "A-225") is not enough without
-    // at least one confirmed locality token in common. Cap the raw total at 30
-    // so it can never reach the POTENTIAL threshold (40) unanchored.
-    const hasCodeSignal = codeScore > 0 || alphaScore > 0 || pocketScore > 0 || subNumScore > 0;
-    const hasLocalityAnchor = localityOverlap.length > 0;
-    const codeWithoutLocality = hasCodeSignal && !hasLocalityAnchor;
-
-    // ── Total ──
-    const raw = codeScore + alphaScore + pocketScore + plotScore
-              + localityScore + partScore + ownerScore + zoneScore + tokenScore + subNumScore
-              + localityPenalty + zonePenalty;
-    const capped = codeWithoutLocality ? Math.min(raw, 30) : raw;
-    const score = Math.min(100, Math.max(0, capped)); // floor at 0, cap at 100
-
-    // ── Determine dominant reason ──
-    let reason = 'PARTIAL';
-    if (codeScore >= 40)              reason = 'COMPOUND_CODE';
-    else if (alphaScore >= 35)        reason = 'ALPHA_CODE';
-    else if (pocketScore >= 28)       reason = 'POCKET_SECTOR';
-    else if (plotScore >= 22)         reason = 'PLOT_NUMBER';
-    else if (localityScore >= 15)     reason = 'LOCALITY';
-    else if (plotScore >= 12)         reason = 'PLOT_PARTIAL';
-    else if (tokenScore >= 10)        reason = 'ADDRESS';
-
-    return { score, reason, detail };
-  }
-
-  // ── Cross-match a single case ────────────────────────────────────────────────
-  //
-  // Two-pass DB fetch:
-  //   Pass 1 (targeted):  compound codes + alphanumeric codes + pocket-sector codes
-  //                       These are high-specificity — LIMIT 80
-  //   Pass 2 (broad):     general tokens + plot numbers + khasra
-  //                       LIMIT 200 to survive high-volume localities
-  //
-  // Minimum score threshold: 20 (was 25)
-  // Alert status: CONFIRMED ≥ 55 · POTENTIAL < 55
+  // ── Cross-match a single case ─────────────────────────────────────────────────
 
   async matchCase(caseId: string) {
     const c = await this.prisma.case.findUnique({
       where: { id: caseId },
-      select: { id: true, propertyAddress: true, ownerName: true },
+      select: { id: true, propertyAddress: true, propertyPincode: true, ownerName: true },
     });
     if (!c) throw new NotFoundException('Case not found');
 
-    // MCD only covers Delhi — skip properties outside its jurisdiction entirely
-    if (isNonDelhiAddress(c.propertyAddress)) {
+    const addr = `${c.propertyAddress}${c.propertyPincode ? ' ' + c.propertyPincode : ''}`;
+
+    // Geographic guard — MCD covers Delhi only
+    if (isNonDelhiAddress(addr)) {
       return { matched: 0, alerts: [], skipped: 'non-delhi' };
     }
 
-    type DPRow = {
-      id: string; address: string; zone: string | null;
-      ownerName: string | null; noticeDate: Date;
-      noticeNumber: string | null; bookingId: string | null;
-    };
+    const aliases  = await this.loadAliases();
+    const caseNorm = normalizeAddress(addr, aliases);
 
-    const compoundCodes  = extractBlockPlotCodes(c.propertyAddress);
-    const alphaCodes     = extractPlotNumbers(c.propertyAddress)
-                            .filter(p => (/^[A-Z]/.test(p) && /\d/.test(p)) || /^\d+[-\/][A-Z]/.test(p));
-    const pocketCodes    = extractPocketSectorCodes(c.propertyAddress);
-    const specificTerms  = [...new Set([...compoundCodes, ...alphaCodes, ...pocketCodes])];
+    const candidates = await this.searchCandidates(caseNorm);
+    if (candidates.length === 0) return { matched: 0, alerts: [] };
 
-    const generalTokens = tokenise(c.propertyAddress);
-    const plotNums      = extractPlotNumbers(c.propertyAddress)
-                           .filter(p => /^\d+/.test(p));
-    const broadTerms    = [...new Set([...generalTokens, ...plotNums])];
+    const scored: { id: string; confidence: number; reasons: MatchSignal[]; dominant: string }[] = [];
 
-    if (specificTerms.length === 0 && broadTerms.length === 0)
-      return { matched: 0, alerts: [] };
-
-    const candidates = new Map<string, DPRow>();
-
-    // Pass 1: targeted specific-identifier search
-    if (specificTerms.length > 0) {
-      const conds  = specificTerms.map((_, i) => `address ILIKE $${i + 1}`).join(' OR ');
-      const params = specificTerms.map(t => `%${t}%`);
-      const rows = await this.prisma.$queryRawUnsafe<DPRow[]>(
-        `SELECT id, address, zone, "ownerName", "noticeDate", "noticeNumber", "bookingId"
-         FROM demolition_properties WHERE ${conds} LIMIT 80`,
-        ...params,
+    for (const dp of candidates) {
+      const dbNorm = normalizeAddress(dp.address, aliases);
+      const { confidence, reasons, dominant } = rankMatch(
+        caseNorm, dbNorm, c.ownerName ?? null, dp.ownerName ?? null,
       );
-      for (const r of rows) candidates.set(r.id, r);
-    }
-
-    // Pass 2: broad locality/number search
-    if (broadTerms.length > 0) {
-      const conds  = broadTerms.map((_, i) => `address ILIKE $${i + 1}`).join(' OR ');
-      const params = broadTerms.map(t => `%${t}%`);
-      const rows = await this.prisma.$queryRawUnsafe<DPRow[]>(
-        `SELECT id, address, zone, "ownerName", "noticeDate", "noticeNumber", "bookingId"
-         FROM demolition_properties WHERE ${conds} LIMIT 200`,
-        ...params,
-      );
-      for (const r of rows) if (!candidates.has(r.id)) candidates.set(r.id, r);
-    }
-
-    const alerts: { demolitionPropertyId: string; score: number; matchReason: string }[] = [];
-
-    for (const dp of candidates.values()) {
-      const { score, reason } = this.scoreAddressPair(
-        c.propertyAddress, dp.address,
-        c.ownerName ?? null, dp.ownerName ?? null,
-        dp.zone,
-      );
-      if (score >= 40) {
-        alerts.push({ demolitionPropertyId: dp.id, score, matchReason: reason });
+      if (confidence >= 40) {
+        scored.push({ id: dp.id, confidence, reasons, dominant });
       }
     }
 
+    scored.sort((a, b) => b.confidence - a.confidence);
+    const top = scored.slice(0, 5);
+
     let created = 0;
-    for (const a of alerts.sort((x, y) => y.score - x.score).slice(0, 5)) {
+    for (const match of top) {
       await this.prisma.demolitionAlert.upsert({
-        where: {
-          caseId_demolitionPropertyId: { caseId, demolitionPropertyId: a.demolitionPropertyId },
-        },
+        where: { caseId_demolitionPropertyId: { caseId, demolitionPropertyId: match.id } },
         create: {
           caseId,
-          demolitionPropertyId: a.demolitionPropertyId,
-          matchStatus:     a.score >= 70 ? 'CONFIRMED' : 'POTENTIAL',
-          confidenceScore: a.score,
-          matchReason:     a.matchReason,
+          demolitionPropertyId: match.id,
+          matchStatus:    match.confidence >= 70 ? 'CONFIRMED' : 'POTENTIAL',
+          confidenceScore: match.confidence,
+          matchReason:     match.dominant,
+          reasons:         match.reasons as any,
         },
         update: {
-          confidenceScore: a.score,
-          matchReason:     a.matchReason,
+          confidenceScore: match.confidence,
+          matchReason:     match.dominant,
+          reasons:         match.reasons as any,
         },
       });
       created++;
@@ -1036,14 +444,17 @@ export class DemolitionService {
     if (created > 0) {
       await this.prisma.case.update({
         where: { id: caseId },
-        data: { hasDemolitionAlert: true },
+        data:  { hasDemolitionAlert: true },
       });
     }
 
-    return { matched: created, alerts: alerts.slice(0, 5) };
+    return {
+      matched: created,
+      alerts: top.map(m => ({ demolitionPropertyId: m.id, confidence: m.confidence, reasons: m.reasons })),
+    };
   }
 
-  // ── Bulk match all cases ─────────────────────────────────────────────────────
+  // ── Bulk match ────────────────────────────────────────────────────────────────
 
   async matchAllCases() {
     const cases = await this.prisma.case.findMany({
@@ -1060,7 +471,7 @@ export class DemolitionService {
     return { processed: cases.length, newAlerts: total };
   }
 
-  // ── List alerts ──────────────────────────────────────────────────────────────
+  // ── List alerts ───────────────────────────────────────────────────────────────
 
   async getAlerts(query: { status?: string; page?: number; limit?: number }) {
     const page  = Math.max(1, Number(query.page ?? 1));
@@ -1075,9 +486,7 @@ export class DemolitionService {
 
     const [data, total] = await Promise.all([
       this.prisma.demolitionAlert.findMany({
-        where,
-        skip,
-        take: limit,
+        where, skip, take: limit,
         orderBy: [{ confidenceScore: 'desc' }, { createdAt: 'desc' }],
         include: {
           case: {
@@ -1100,13 +509,10 @@ export class DemolitionService {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  // ── Dismiss / confirm an alert ───────────────────────────────────────────────
+  // ── Dismiss / confirm alert ───────────────────────────────────────────────────
 
   async updateAlertStatus(
-    alertId: string,
-    status: 'CONFIRMED' | 'DISMISSED',
-    reason?: string,
-    userId?: string,
+    alertId: string, status: 'CONFIRMED' | 'DISMISSED', reason?: string, userId?: string,
   ) {
     return this.prisma.demolitionAlert.update({
       where: { id: alertId },
@@ -1119,27 +525,36 @@ export class DemolitionService {
     });
   }
 
-  // ── Cleanup: remove non-Delhi false-positive alerts ─────────────────────────
-  //
-  // Scans every case that has hasDemolitionAlert=true and removes its alerts
-  // (+ resets the flag) if the case property is outside Delhi.
-  // Run once after deploying the geographic guard to purge existing bad data.
+  // ── Human feedback ────────────────────────────────────────────────────────────
+
+  async recordFeedback(alertId: string, feedback: 'CORRECT' | 'WRONG', userId: string) {
+    return this.prisma.demolitionAlert.update({
+      where: { id: alertId },
+      data: {
+        humanFeedback: feedback,
+        feedbackBy:    userId,
+        feedbackAt:    new Date(),
+      },
+    });
+  }
+
+  // ── Cleanup: remove non-Delhi false-positive alerts ───────────────────────────
 
   async cleanupNonDelhiAlerts() {
     const flagged = await this.prisma.case.findMany({
       where: { hasDemolitionAlert: true },
-      select: { id: true, propertyAddress: true },
+      select: { id: true, propertyAddress: true, propertyPincode: true },
     });
 
-    let purged = 0;
-    let kept   = 0;
+    let purged = 0; let kept = 0;
 
     for (const c of flagged) {
-      if (isNonDelhiAddress(c.propertyAddress)) {
+      const addr = `${c.propertyAddress}${c.propertyPincode ? ' ' + c.propertyPincode : ''}`;
+      if (isNonDelhiAddress(addr)) {
         await this.prisma.demolitionAlert.deleteMany({ where: { caseId: c.id } });
         await this.prisma.case.update({
           where: { id: c.id },
-          data: { hasDemolitionAlert: false },
+          data:  { hasDemolitionAlert: false },
         });
         purged++;
       } else {
@@ -1150,7 +565,7 @@ export class DemolitionService {
     return { scanned: flagged.length, purged, kept };
   }
 
-  // ── Distinct zones ───────────────────────────────────────────────────────────
+  // ── Distinct zones ────────────────────────────────────────────────────────────
 
   async getZones() {
     const rows = await this.prisma.$queryRaw<{ zone: string }[]>`
@@ -1160,145 +575,25 @@ export class DemolitionService {
     return rows.map(r => r.zone);
   }
 
-  // ── Smart live address check (used during case creation) ─────────────────────
-  //
-  // Three-pass fetch:
-  //   Pass 1 (compound codes):    "BT-57", "G-91", "A-8"       LIMIT 60
-  //   Pass 2 (contextual pairs):  "KHASRA%812%", "PLOT%57%"    LIMIT 60
-  //   Pass 3 (locality/tokens):   "SHALIMARBAGH", "UTTAM"      LIMIT 120
-  //
-  // Results merged, deduplicated, and scored with scoreAddressPair().
-  // Returns up to 8 results, min score 10.
-  //
-  // Confidence: HIGH ≥ 60 · MEDIUM ≥ 30 · LOW ≥ 10
+  // ── Live address check (during case creation) ─────────────────────────────────
 
-  async checkAddress(query: {
-    address: string;
-    pincode?: string;
-    ownerName?: string;
-  }) {
+  async checkAddress(query: { address: string; pincode?: string; ownerName?: string }) {
     const { address, pincode, ownerName } = query;
     if (!address || address.trim().length < 4) return { matches: [] };
 
-    // MCD jurisdiction guard — never match non-Delhi properties
-    if (isNonDelhiAddress(address)) return { matches: [] };
+    const full = `${address}${pincode ? ' ' + pincode : ''}`;
+    if (isNonDelhiAddress(full)) return { matches: [] };
 
-    type DPRow = {
-      id: string; address: string; zone: string | null; locality: string | null;
-      ownerName: string | null; noticeDate: Date; noticeNumber: string | null; bookingId: string | null;
-    };
+    const aliases  = await this.loadAliases();
+    const caseNorm = normalizeAddress(full, aliases);
 
-    const compoundCodes = extractBlockPlotCodes(address);
-    const alphaCodes    = extractPlotNumbers(address)
-      .filter(p => (/^[A-Z]/.test(p) && /\d/.test(p)) || /^\d+[-\/][A-Z]/.test(p));
-    const pocketCodes   = extractPocketSectorCodes(address);
-    const plotNums      = extractPlotNumbers(address).filter(p => /^\d+/.test(p));
-    const lightToks     = lightTokenise(address);
+    const candidates = await this.searchCandidates(caseNorm);
 
-    const pincodeVal = (address.match(/\b\d{6}\b/)
-      ?? (pincode ? [pincode.match(/\b\d{6}\b/)?.[0]].filter(Boolean) : [])
-    )?.[0] ?? null;
-
-    // All specific high-precision identifiers for Pass 1
-    const specificIds = [...new Set([...compoundCodes, ...alphaCodes, ...pocketCodes])];
-
-    const candidates = new Map<string, DPRow>();
-
-    const fetchRows = async (terms: string[], limit: number): Promise<DPRow[]> => {
-      if (terms.length === 0) return [];
-      const conds  = terms.map((_, i) => `address ILIKE $${i + 1}`).join(' OR ');
-      const params = terms.map(t => `%${t}%`);
-      return this.prisma.$queryRawUnsafe<DPRow[]>(
-        `SELECT id, address, zone, locality, "ownerName", "noticeDate", "noticeNumber", "bookingId"
-         FROM demolition_properties WHERE ${conds} LIMIT ${limit}`,
-        ...params,
+    const scored = candidates.map(dp => {
+      const dbNorm = normalizeAddress(dp.address, aliases);
+      const { confidence, reasons, dominant } = rankMatch(
+        caseNorm, dbNorm, ownerName ?? null, dp.ownerName ?? null,
       );
-    };
-
-    // Pass 1: high-precision identifiers
-    for (const r of await fetchRows(specificIds, 60))
-      candidates.set(r.id, r);
-
-    // Pass 2: contextual KHASRA/PLOT/H.NO keyword + number pairs
-    const ctxTerms: string[] = [];
-    const upper = preProcess(address).replace(/[^\w\s\/\-]/g, ' ');
-    for (const kw of ['KHASRA', 'PLOT', 'HNO', 'SURVEY', 'GATA', 'KHATA', 'SHOP', 'FLAT']) {
-      const re = new RegExp(`${kw}\\s+(\\d[\\d\\/\\-A-Z]*)`, 'i');
-      const m  = upper.match(re);
-      if (m?.[1]) ctxTerms.push(`%${kw}%${m[1]}%`);
-    }
-    // Run contextual pairs with raw ILIKE (not via fetchRows which wraps in %)
-    if (ctxTerms.length > 0) {
-      const conds  = ctxTerms.map((_, i) => `address ILIKE $${i + 1}`).join(' OR ');
-      const rows   = await this.prisma.$queryRawUnsafe<DPRow[]>(
-        `SELECT id, address, zone, locality, "ownerName", "noticeDate", "noticeNumber", "bookingId"
-         FROM demolition_properties WHERE ${conds} LIMIT 60`,
-        ...ctxTerms,
-      );
-      for (const r of rows) if (!candidates.has(r.id)) candidates.set(r.id, r);
-    }
-
-    // Pass 3: broad locality / light-token search
-    const broadTerms = [...new Set([...lightToks, ...plotNums])].slice(0, 18);
-    for (const r of await fetchRows(broadTerms, 120))
-      if (!candidates.has(r.id)) candidates.set(r.id, r);
-
-    // Pass 4: AND-search — locality token + plot number in the same record.
-    // Catches compact DB format: "BT-57 Shalimar Bagh" when we have locality
-    // "SHALIMARBAGH" + plot number "57". Simple ILIKE '%57%' with LIMIT 120
-    // might miss the record if many records contain "57"; the AND constraint
-    // pins locality and makes the search highly selective.
-    const localityArr = [...localityTokens(address)]
-      .filter(l => l.length >= 6 && !LIGHT_STOP.has(l))
-      .slice(0, 3);
-    if (localityArr.length > 0 && plotNums.length > 0) {
-      for (const loc of localityArr) {
-        for (const num of plotNums.slice(0, 4)) {
-          const rows = await this.prisma.$queryRawUnsafe<DPRow[]>(
-            `SELECT id, address, zone, locality, "ownerName", "noticeDate", "noticeNumber", "bookingId"
-             FROM demolition_properties
-             WHERE address ILIKE $1 AND address ILIKE $2
-             LIMIT 40`,
-            `%${loc}%`, `%${num}%`,
-          );
-          for (const r of rows) if (!candidates.has(r.id)) candidates.set(r.id, r);
-        }
-      }
-    }
-
-    // Pass 5: block-letter prefix search — if case has "Block BT" we search
-    // "BT-%" records within the locality. Catches all "BT-*" variants.
-    const caseBlocks = compoundCodes
-      .map(c => c.split('-')[0])
-      .filter((b, i, a) => b && b.length >= 1 && b.length <= 4 && a.indexOf(b) === i)
-      .slice(0, 3);
-    if (caseBlocks.length > 0 && localityArr.length > 0) {
-      for (const block of caseBlocks) {
-        for (const loc of localityArr.slice(0, 2)) {
-          const rows = await this.prisma.$queryRawUnsafe<DPRow[]>(
-            `SELECT id, address, zone, locality, "ownerName", "noticeDate", "noticeNumber", "bookingId"
-             FROM demolition_properties
-             WHERE address ILIKE $1 AND address ILIKE $2
-             LIMIT 30`,
-            `%${block}-%`, `%${loc}%`,
-          );
-          for (const r of rows) if (!candidates.has(r.id)) candidates.set(r.id, r);
-        }
-      }
-    }
-
-    // ── Score all candidates ──
-    const scored = [...candidates.values()].map(dp => {
-      const { score, reason, detail } = this.scoreAddressPair(
-        address, dp.address,
-        ownerName ?? null, dp.ownerName ?? null,
-        dp.zone,
-      );
-
-      // Pincode bonus (not in scoreAddressPair since it's only in live-check context)
-      const pincodeBonus = pincodeVal && dp.address.includes(pincodeVal) ? 6 : 0;
-      const finalScore   = Math.min(100, score + pincodeBonus);
-
       return {
         id:           dp.id,
         address:      dp.address,
@@ -1308,30 +603,41 @@ export class DemolitionService {
         noticeDate:   dp.noticeDate,
         noticeNumber: dp.noticeNumber,
         bookingId:    dp.bookingId,
-        score:        finalScore,
-        matchedOn: {
-          ...detail,
-          pincode: pincodeBonus > 0,
-        },
-        // Raised thresholds to reduce false positives from code-only matches
-        // without locality confirmation (e.g., "24-B" alone hitting Karol Bagh).
-        confidence: finalScore >= 65 ? 'HIGH' : finalScore >= 35 ? 'MEDIUM' : 'LOW',
-        matchReason: reason,
+        confidence,
+        reasons,
+        matchReason: dominant,
       };
     });
 
-    // Keep highest score per id, filter by minimum threshold, sort descending
-    const best = new Map<string, typeof scored[0]>();
-    for (const s of scored) {
-      const prev = best.get(s.id);
-      if (!prev || s.score > prev.score) best.set(s.id, s);
-    }
-
     return {
-      matches: [...best.values()]
-        .filter(s => s.score >= 40)           // raised: must clear same bar as matchCase
-        .sort((a, b) => b.score - a.score)
+      matches: scored
+        .filter(s => s.confidence >= 40)
+        .sort((a, b) => b.confidence - a.confidence)
         .slice(0, 6),
     };
+  }
+
+  // ── Alias management ──────────────────────────────────────────────────────────
+
+  async getAliases() {
+    return this.prisma.addressAlias.findMany({ orderBy: { alias: 'asc' } });
+  }
+
+  async upsertAlias(alias: string, canonical: string, zone?: string) {
+    const result = await this.prisma.addressAlias.upsert({
+      where:  { alias: alias.toUpperCase() },
+      create: { alias: alias.toUpperCase(), canonical: canonical.toUpperCase(), zone },
+      update: { canonical: canonical.toUpperCase(), zone },
+    });
+    this.invalidateAliasCache();
+    return result;
+  }
+
+  async deleteAlias(alias: string) {
+    const result = await this.prisma.addressAlias.delete({
+      where: { alias: alias.toUpperCase() },
+    });
+    this.invalidateAliasCache();
+    return result;
   }
 }
