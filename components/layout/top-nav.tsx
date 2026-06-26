@@ -1,6 +1,6 @@
 'use client'
 
-import { Bell, LogOut, Moon, Search, Settings, Sun, User } from 'lucide-react'
+import { LogOut, Moon, Search, Settings, Sun, User } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { useUser, useClerk } from '@clerk/nextjs'
 import { Button } from '@/components/ui/button'
@@ -16,6 +16,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { RoleSwitcher } from '@/components/role-switcher'
 import { UserRoleBadge } from '@/components/user-role-badge'
+import { NotificationBell } from '@/components/notifications/notification-bell'
 
 export function TopNav() {
   const { theme, setTheme } = useTheme()
@@ -60,10 +61,7 @@ export function TopNav() {
           </Button>
 
           {/* Notifications */}
-          <Button variant="ghost" size="icon" className="h-9 w-9 relative hover:bg-secondary transition-all duration-200 group">
-            <Bell className="w-4 h-4 group-hover:scale-110 transition-transform" />
-            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-          </Button>
+          <NotificationBell />
 
           {/* User menu */}
           <DropdownMenu>
