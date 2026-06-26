@@ -8,11 +8,11 @@
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- ── 2. GIN index on demolition address (enables fast similarity search) ──────
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_demolition_address_trgm
+-- Note: no CONCURRENTLY — Prisma runs migrations inside a transaction
+CREATE INDEX IF NOT EXISTS idx_demolition_address_trgm
   ON demolition_properties USING GIN (address gin_trgm_ops);
 
--- Also index locality for zone-filtered searches
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_demolition_locality
+CREATE INDEX IF NOT EXISTS idx_demolition_locality
   ON demolition_properties (locality)
   WHERE locality IS NOT NULL;
 
