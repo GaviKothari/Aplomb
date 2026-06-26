@@ -493,7 +493,17 @@ export class DemolitionService implements OnModuleInit {
       this.prisma.demolitionAlert.findMany({
         where, skip, take: limit,
         orderBy: [{ confidenceScore: 'desc' }, { createdAt: 'desc' }],
-        include: {
+        select: {
+          id: true,
+          caseId: true,
+          demolitionPropertyId: true,
+          matchStatus: true,
+          confidenceScore: true,
+          matchReason: true,
+          createdAt: true,
+          dismissedAt: true,
+          dismissalReason: true,
+          dismissedById: true,
           case: {
             select: {
               id: true, caseNumber: true, propertyAddress: true, ownerName: true,
