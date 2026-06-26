@@ -25,6 +25,55 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 
+// ─── Geographic guard ────────────────────────────────────────────────────────
+//
+// MCD (Municipal Corporation of Delhi) has jurisdiction ONLY over Delhi.
+// Any case property outside Delhi must be rejected immediately — no scoring.
+// Delhi pincodes: 110001–110096.  NCR pincodes outside Delhi start with 12x/20x/13x.
+
+const NON_DELHI_CITIES = new Set([
+  'GURUGRAM', 'GURGAON', 'NOIDA', 'GREATER NOIDA', 'GHAZIABAD',
+  'FARIDABAD', 'MANESAR', 'SONIPAT', 'PALWAL', 'REWARI', 'BHIWADI',
+  'MUMBAI', 'BANGALORE', 'BENGALURU', 'CHENNAI', 'HYDERABAD',
+  'PUNE', 'KOLKATA', 'AHMEDABAD', 'SURAT', 'JAIPUR', 'LUCKNOW',
+  'PATNA', 'BHOPAL', 'INDORE', 'NAGPUR', 'CHANDIGARH', 'LUDHIANA',
+  'AMRITSAR', 'AGRA', 'MEERUT', 'ALLAHABAD', 'PRAYAGRAJ', 'KANPUR',
+  'VARANASI', 'DEHRADUN', 'HARIDWAR', 'RANCHI', 'RAIPUR', 'COIMBATORE',
+  'MYSORE', 'MYSURU', 'VISAKHAPATNAM', 'KOCHI', 'THIRUVANANTHAPURAM',
+]);
+
+const NON_DELHI_STATES = [
+  'HARYANA', 'UTTAR PRADESH', 'RAJASTHAN', 'MAHARASHTRA', 'KARNATAKA',
+  'TAMIL NADU', 'TELANGANA', 'ANDHRA PRADESH', 'GUJARAT', 'PUNJAB',
+  'WEST BENGAL', 'MADHYA PRADESH', 'UTTARAKHAND', 'JHARKHAND',
+  'CHHATTISGARH', 'KERALA', 'ODISHA', 'ASSAM', 'BIHAR',
+];
+
+/** Returns true when the address is clearly outside Delhi's MCD jurisdiction. */
+function isNonDelhiAddress(address: string): boolean {
+  const upper = address.toUpperCase().replace(/[^\w\s]/g, ' ');
+
+  // 1. Pincode outside Delhi range (110001–110096 → starts with "11")
+  const pin = upper.match(/\b(\d{6})\b/)?.[1];
+  if (pin && !pin.startsWith('11')) return true;
+
+  // 2. Explicit non-Delhi city name
+  for (const city of NON_DELHI_CITIES) {
+    if (upper.includes(city)) return true;
+  }
+
+  // 3. State names that are never Delhi
+  for (const state of NON_DELHI_STATES) {
+    if (upper.includes(state)) return true;
+  }
+
+  // 4. Common short abbreviations used in Indian addresses
+  // "HR" = Haryana, "UP" = Uttar Pradesh — only when clearly a state code context
+  if (/\bHARYANA\b/.test(upper) || /[\s,\-]HR[\s,\-]/.test(upper)) return true;
+
+  return false;
+}
+
 // ─── Stop-word sets ──────────────────────────────────────────────────────────
 
 /** For cross-match (matchCase): aggressive — keeps only area/locality words. */
@@ -190,60 +239,67 @@ const TWO_WORD_LOCALITIES: Array<[RegExp, string]> = [
 
 // ─── Locality aliases ────────────────────────────────────────────────────────
 
+// Only canonical multi-character full-name aliases are kept.
+// Single-word fragments (ASHOK, VIKAS, GANDHI, PATEL…) are intentionally
+// REMOVED — they are far too common in Indian addresses outside Delhi and
+// were the primary driver of false-positive matches (e.g. "Ashok Estate,
+// Gurugram" → ASHOKVIHAR alias → locality hit → false CONFIRMED alert).
 const LOCALITY_ALIASES: Record<string, string> = {
   // North/Keshavpuram
-  'SHALIMAR':    'SHALIMARBAGH',  'SHALIMARBAGH': 'SHALIMARBAGH',
-  'RANIBAGH':    'RANIBAGH',      'RANI':         'RANIBAGH',
-  'KIRTI':       'KIRTINAGAR',    'KIRTINAGAR':   'KIRTINAGAR',
-  'ASHOK':       'ASHOKVIHAR',    'ASHOKVIHAR':   'ASHOKVIHAR',
-  'PITAMPURA':   'PITAMPURA',     'PITAM':        'PITAMPURA',
-  'SHAKTI':      'SHAKTINAGAR',
-  'SADARBAZAR':  'SADARBAZAR',    'SADAR':        'SADARBAZAR',
-  'KAROLBAGH':   'KAROLBAGH',     'KAROL':        'KAROLBAGH',
-  'PATEL':       'PATELNAGAR',
-  'RAJOURI':     'RAJOURIGARDEN', 'RAJORI':       'RAJOURIGARDEN',
-  'PASCHIM':     'PASCHIMVIHAR',  'PASCHIMVIHAR': 'PASCHIMVIHAR',
-  'SUBHASH':     'SUBHASHNAGAR',
-  'TILAK':       'TILAKNAGAR',
-  'JANAKPURI':   'JANAKPURI',     'JANAK':        'JANAKPURI',
-  'VIKASPURI':   'VIKASPURI',     'VIKAS':        'VIKASPURI',
-  'UTTAM':       'UTTAMNAGAR',    'UTTAMNAGAR':   'UTTAMNAGAR',
+  'SHALIMARBAGH':   'SHALIMARBAGH',
+  'RANIBAGH':       'RANIBAGH',
+  'KIRTINAGAR':     'KIRTINAGAR',
+  'ASHOKVIHAR':     'ASHOKVIHAR',
+  'PITAMPURA':      'PITAMPURA',
+  'SADARBAZAR':     'SADARBAZAR',
+  'KAROLBAGH':      'KAROLBAGH',
+  'PATELNAGAR':     'PATELNAGAR',
+  'RAJOURIGARDEN':  'RAJOURIGARDEN',
+  'PASCHIMVIHAR':   'PASCHIMVIHAR',
+  'SUBHASHNAGAR':   'SUBHASHNAGAR',
+  'TILAKNAGAR':     'TILAKNAGAR',
+  'JANAKPURI':      'JANAKPURI',
+  'VIKASPURI':      'VIKASPURI',
+  'UTTAMNAGAR':     'UTTAMNAGAR',
   // South/Central
-  'LAJPAT':      'LAJPATNAGAR',   'LAJPATNAGAR':  'LAJPATNAGAR',
-  'SARITA':      'SARITAVIHAR',   'SARITHA':      'SARITAVIHAR',
-  'MALVIYA':     'MALVIYANAGAR',
-  'HAUZKHAS':    'HAUZKHAS',      'HAUZ':         'HAUZKHAS',
-  'VASANT':      'VASANTKUNJ',    'VASANTKUNJ':   'VASANTKUNJ',
-  'VASANTVIHAR': 'VASANTVIHAR',
-  'SAKET':       'SAKET',
+  'LAJPATNAGAR':    'LAJPATNAGAR',
+  'SARITAVIHAR':    'SARITAVIHAR',
+  'MALVIYANAGAR':   'MALVIYANAGAR',
+  'HAUZKHAS':       'HAUZKHAS',
+  'VASANTKUNJ':     'VASANTKUNJ',
+  'VASANTVIHAR':    'VASANTVIHAR',
+  'SAKET':          'SAKET',
   // East/Shahdara
-  'MAYUR':       'MAYURVIHAR',    'MAYURVIHAR':   'MAYURVIHAR',
-  'PREET':       'PREETVIHAR',    'PREETVIHAR':   'PREETVIHAR',
-  'VINOD':       'VINODNAGAR',
-  'ANAND':       'ANANDVIHAR',
-  'YAMUNA':      'YAMUNAVIHAR',   'YAMUNAVIHAR':  'YAMUNAVIHAR',
-  'GANDHI':      'GANDHINAGAR',
-  'GEETA':       'GEETACOLONY',
-  'PATPARGANJ':  'PATPARGANJ',
-  'LAXMI':       'LAXMINAGAR',    'LAXMINAGAR':   'LAXMINAGAR',
-  'KONDLI':         'KONDLI',
-  'SHAHDARA':       'SHAHDARA',
-  'DILSHAD':        'DILSHADGARDEN',   'DILSHADGARDEN':    'DILSHADGARDEN',
-  'VASUNDHARA':     'VASUNDHARAENCLAVE',
-  'JANGPURA':       'JANGPURA',
-  'KARAWAL':        'KARAWALNAGAR',    'KARWAL':           'KARAWALNAGAR',
-  'BHAJAN':         'BHAJANPURA',      'BHAJANPURA':       'BHAJANPURA',
-  'SHASTRI':        'SHASTRINAGAR',
+  'MAYURVIHAR':         'MAYURVIHAR',
+  'PREETVIHAR':         'PREETVIHAR',
+  'VINODNAGAR':         'VINODNAGAR',
+  'ANANDVIHAR':         'ANANDVIHAR',
+  'YAMUNAVIHAR':        'YAMUNAVIHAR',
+  'GANDHINAGAR':        'GANDHINAGAR',
+  'GEETACOLONY':        'GEETACOLONY',
+  'PATPARGANJ':         'PATPARGANJ',
+  'LAXMINAGAR':         'LAXMINAGAR',
+  'KONDLI':             'KONDLI',
+  'SHAHDARA':           'SHAHDARA',
+  'DILSHADGARDEN':      'DILSHADGARDEN',
+  'VASUNDHARAENCLAVE':  'VASUNDHARAENCLAVE',
+  'JANGPURA':           'JANGPURA',
+  'KARAWALNAGAR':       'KARAWALNAGAR',
+  'BHAJANPURA':         'BHAJANPURA',
+  'SHASTRINAGAR':       'SHASTRINAGAR',
+  'SHASTRIPARK':        'SHASTRIPARK',
+  'WELCOMECOLONY':      'WELCOMECOLONY',
   // Rohini
-  'ROHINI':      'ROHINI',
-  'MANGOL':      'MANGOLPURI',    'MANGOLPURI':   'MANGOLPURI',
-  'SULTAN':      'SULTANPURI',    'SULTANPURI':   'SULTANPURI',
-  'TAGORE':      'TAGOREGARDEN',
+  'ROHINI':         'ROHINI',
+  'MANGOLPURI':     'MANGOLPURI',
+  'SULTANPURI':     'SULTANPURI',
+  'TAGOREGARDEN':   'TAGOREGARDEN',
+  'BADLI':          'BADLI',
   // Other
-  'DWARKA':      'DWARKA',
-  'NARELA':      'NARELA',
-  'NAJAFGARH':   'NAJAFGARH',
-  'BAWANA':      'BAWANA',
+  'DWARKA':         'DWARKA',
+  'NARELA':         'NARELA',
+  'NAJAFGARH':      'NAJAFGARH',
+  'BAWANA':         'BAWANA',
 };
 
 // ─── Zone inference ──────────────────────────────────────────────────────────
@@ -830,29 +886,36 @@ export class DemolitionService {
     detail.subNumScore = subNumScore;
 
     // 11. Locality mismatch penalty (0 or negative)
-    // "24-B" appears in thousands of Delhi properties. Without a locality anchor
-    // the match is noise. If the case has a clear locality but the DB record's
-    // locality doesn't overlap at all, heavily penalise.
+    // Without a locality anchor any plot number ("225", "57") can appear in
+    // thousands of Delhi records and produces noise. Penalise heavily.
     let localityPenalty = 0;
     if (caseLocality.size >= 1 && localityOverlap.length === 0 && dbLocality.size >= 1) {
-      localityPenalty = -32;
+      localityPenalty = -50;   // was -32 — stronger to kill cross-locality false positives
     }
     detail.localityPenalty = localityPenalty;
 
     // 12. Zone mismatch penalty (0 or negative)
-    // Uses text-inferred zones (more reliable than stored field).
-    // Karol Bagh (Central Zone) should not match Dilshad Garden (Shahdara Zone).
+    // Karol Bagh (Central Zone) must not match Dilshad Garden (Shahdara Zone).
     let zonePenalty = 0;
     if (caseZone && effectiveDbZone && caseZone !== effectiveDbZone) {
-      zonePenalty = -22;
+      zonePenalty = -35;   // was -22 — stronger cross-zone barrier
     }
     detail.zonePenalty = zonePenalty;
+
+    // 13. Hard cap: code signal without locality anchor
+    // An alpha/compound code alone (e.g. "A-225") is not enough without
+    // at least one confirmed locality token in common. Cap the raw total at 30
+    // so it can never reach the POTENTIAL threshold (40) unanchored.
+    const hasCodeSignal = codeScore > 0 || alphaScore > 0 || pocketScore > 0 || subNumScore > 0;
+    const hasLocalityAnchor = localityOverlap.length > 0;
+    const codeWithoutLocality = hasCodeSignal && !hasLocalityAnchor;
 
     // ── Total ──
     const raw = codeScore + alphaScore + pocketScore + plotScore
               + localityScore + partScore + ownerScore + zoneScore + tokenScore + subNumScore
               + localityPenalty + zonePenalty;
-    const score = Math.min(100, Math.max(0, raw)); // floor at 0, cap at 100
+    const capped = codeWithoutLocality ? Math.min(raw, 30) : raw;
+    const score = Math.min(100, Math.max(0, capped)); // floor at 0, cap at 100
 
     // ── Determine dominant reason ──
     let reason = 'PARTIAL';
@@ -884,6 +947,11 @@ export class DemolitionService {
       select: { id: true, propertyAddress: true, ownerName: true },
     });
     if (!c) throw new NotFoundException('Case not found');
+
+    // MCD only covers Delhi — skip properties outside its jurisdiction entirely
+    if (isNonDelhiAddress(c.propertyAddress)) {
+      return { matched: 0, alerts: [], skipped: 'non-delhi' };
+    }
 
     type DPRow = {
       id: string; address: string; zone: string | null;
@@ -939,7 +1007,7 @@ export class DemolitionService {
         c.ownerName ?? null, dp.ownerName ?? null,
         dp.zone,
       );
-      if (score >= 15) {
+      if (score >= 40) {
         alerts.push({ demolitionPropertyId: dp.id, score, matchReason: reason });
       }
     }
@@ -953,7 +1021,7 @@ export class DemolitionService {
         create: {
           caseId,
           demolitionPropertyId: a.demolitionPropertyId,
-          matchStatus:     a.score >= 55 ? 'CONFIRMED' : 'POTENTIAL',
+          matchStatus:     a.score >= 70 ? 'CONFIRMED' : 'POTENTIAL',
           confidenceScore: a.score,
           matchReason:     a.matchReason,
         },
@@ -1051,6 +1119,37 @@ export class DemolitionService {
     });
   }
 
+  // ── Cleanup: remove non-Delhi false-positive alerts ─────────────────────────
+  //
+  // Scans every case that has hasDemolitionAlert=true and removes its alerts
+  // (+ resets the flag) if the case property is outside Delhi.
+  // Run once after deploying the geographic guard to purge existing bad data.
+
+  async cleanupNonDelhiAlerts() {
+    const flagged = await this.prisma.case.findMany({
+      where: { hasDemolitionAlert: true },
+      select: { id: true, propertyAddress: true },
+    });
+
+    let purged = 0;
+    let kept   = 0;
+
+    for (const c of flagged) {
+      if (isNonDelhiAddress(c.propertyAddress)) {
+        await this.prisma.demolitionAlert.deleteMany({ where: { caseId: c.id } });
+        await this.prisma.case.update({
+          where: { id: c.id },
+          data: { hasDemolitionAlert: false },
+        });
+        purged++;
+      } else {
+        kept++;
+      }
+    }
+
+    return { scanned: flagged.length, purged, kept };
+  }
+
   // ── Distinct zones ───────────────────────────────────────────────────────────
 
   async getZones() {
@@ -1080,6 +1179,9 @@ export class DemolitionService {
   }) {
     const { address, pincode, ownerName } = query;
     if (!address || address.trim().length < 4) return { matches: [] };
+
+    // MCD jurisdiction guard — never match non-Delhi properties
+    if (isNonDelhiAddress(address)) return { matches: [] };
 
     type DPRow = {
       id: string; address: string; zone: string | null; locality: string | null;
@@ -1227,9 +1329,9 @@ export class DemolitionService {
 
     return {
       matches: [...best.values()]
-        .filter(s => s.score >= 22)           // min bar raised; pure code-only hits filtered out
+        .filter(s => s.score >= 40)           // raised: must clear same bar as matchCase
         .sort((a, b) => b.score - a.score)
-        .slice(0, 6),                          // top 6 — enough coverage, reduces noise
+        .slice(0, 6),
     };
   }
 }

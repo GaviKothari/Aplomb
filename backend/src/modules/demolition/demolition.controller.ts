@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Param, Query, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Query, Body } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { DemolitionService } from './demolition.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -59,6 +59,13 @@ export class DemolitionController {
   @ApiOperation({ summary: 'Bulk cross-match all unscanned cases (async)' })
   matchAll() {
     return this.service.matchAllCases();
+  }
+
+  @Post('cleanup-non-delhi')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'One-off: delete false-positive alerts for non-Delhi properties and reset their flags' })
+  cleanupNonDelhi() {
+    return this.service.cleanupNonDelhiAlerts();
   }
 
   @Patch('alerts/:id')
