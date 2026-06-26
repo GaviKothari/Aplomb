@@ -32,30 +32,30 @@ import { normalizeAddress, isNonDelhiAddress, NormalizedAddress } from './addres
 // ── Feature weight map ────────────────────────────────────────────────────────
 
 const WEIGHTS = {
-  blockPlotCode:     30,
-  locality:          25,
-  plotNo:            15,
-  block:             10,
-  pincode:            8,
-  ownerSurname:       7,
-  zone:               5,
+  blockPlotCode: 30,
+  locality: 25,
+  plotNo: 15,
+  block: 10,
+  pincode: 8,
+  ownerSurname: 7,
+  zone: 5,
   // Penalties (applied as negatives)
   localityMismatch: -50,
-  zoneMismatch:     -35,
+  zoneMismatch: -35,
 };
 
 export interface MatchSignal {
-  signal:       string
-  weight:       number       // contribution weight (can be negative for penalties)
-  matched:      boolean
+  signal: string
+  weight: number       // contribution weight (can be negative for penalties)
+  matched: boolean
   contribution: number       // actual points added (0 if not matched)
-  detail?:      string
+  detail?: string
 }
 
 export interface MatchResult {
   confidence: number         // 0–100 percentage
-  reasons:    MatchSignal[]
-  dominant:   string         // which signal drove the match
+  reasons: MatchSignal[]
+  dominant: string         // which signal drove the match
 }
 
 // ── Ranking engine ────────────────────────────────────────────────────────────
@@ -86,17 +86,17 @@ function ownerSurnameMatch(a: string | null, b: string | null): boolean {
 }
 
 function rankMatch(
-  caseN:  NormalizedAddress,
-  dbN:    NormalizedAddress,
+  caseN: NormalizedAddress,
+  dbN: NormalizedAddress,
   caseOwner: string | null,
-  dbOwner:   string | null,
+  dbOwner: string | null,
 ): MatchResult {
   const signals: MatchSignal[] = [];
   let score = 0;
 
   // 1. Block + Plot compound code  (30%)
   const codeHit = codesCompatible(caseN.blockPlotCode, dbN.blockPlotCode)
-               || codesCompatible(caseN.pocketSectorCode, dbN.pocketSectorCode);
+    || codesCompatible(caseN.pocketSectorCode, dbN.pocketSectorCode);
   const codeContrib = codeHit ? WEIGHTS.blockPlotCode : 0;
   score += codeContrib;
   signals.push({
@@ -117,8 +117,8 @@ function rankMatch(
 
   // 3. Plot / House number  (15%)
   const plotHit = numsCompatible(caseN.plotNo, dbN.plotNo)
-               || numsCompatible(caseN.houseNo, dbN.houseNo)
-               || numsCompatible(caseN.khasra,  dbN.khasra);
+    || numsCompatible(caseN.houseNo, dbN.houseNo)
+    || numsCompatible(caseN.khasra, dbN.khasra);
   const plotContrib = plotHit ? WEIGHTS.plotNo : 0;
   score += plotContrib;
   signals.push({
@@ -170,7 +170,7 @@ function rankMatch(
 
   // Locality mismatch: both have a clear locality but they differ
   const locMismatch = !!caseN.locality && !!dbN.locality && caseN.locality !== dbN.locality;
-  const locPenalty  = locMismatch ? WEIGHTS.localityMismatch : 0;
+  const locPenalty = locMismatch ? WEIGHTS.localityMismatch : 0;
   score += locPenalty;
   if (locMismatch) {
     signals.push({
@@ -182,7 +182,7 @@ function rankMatch(
 
   // Zone mismatch: both have a zone but they differ
   const zoneMismatch = !!caseN.zone && !!dbN.zone && caseN.zone !== dbN.zone;
-  const zonePenalty  = zoneMismatch ? WEIGHTS.zoneMismatch : 0;
+  const zonePenalty = zoneMismatch ? WEIGHTS.zoneMismatch : 0;
   score += zonePenalty;
   if (zoneMismatch) {
     signals.push({
@@ -193,7 +193,7 @@ function rankMatch(
   }
 
   // Hard cap: code signal without locality anchor → max 30
-  const hasCode   = codeHit || plotHit;
+  const hasCode = codeHit || plotHit;
   const hasLocality = locHit;
   if (hasCode && !hasLocality) {
     score = Math.min(score, 30);
@@ -203,11 +203,11 @@ function rankMatch(
 
   // Dominant signal
   let dominant = 'PARTIAL';
-  if (codeHit)  dominant = 'COMPOUND_CODE';
+  if (codeHit) dominant = 'COMPOUND_CODE';
   else if (locHit && plotHit) dominant = 'LOCALITY_PLOT';
-  else if (locHit)  dominant = 'LOCALITY';
+  else if (locHit) dominant = 'LOCALITY';
   else if (plotHit) dominant = 'PLOT_NUMBER';
-  else if (pinHit)  dominant = 'PINCODE';
+  else if (pinHit) dominant = 'PINCODE';
 
   return { confidence, reasons: signals, dominant };
 }
@@ -223,10 +223,15 @@ export class DemolitionService implements OnModuleInit {
   private aliasLoadedAt = 0;
   private readonly ALIAS_TTL_MS = 10 * 60 * 1000; // 10 min
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   async onModuleInit() {
-    await this.loadAliases();
+    try {
+      await this.loadAliases();
+    } catch (err) {
+      // Table may not exist yet (migration pending) — service still starts
+      this.logger.warn(`Alias cache skipped at startup: ${(err as Error).message}`);
+    }
   }
 
   private async loadAliases(): Promise<Map<string, string>> {
@@ -344,7 +349,7 @@ export class DemolitionService implements OnModuleInit {
       total,
       matchedCases,
       recentAlerts,
-      zones:     zoneRows.map(r => ({ zone: r.zone, count: Number(r.count) })),
+      zones: zoneRows.map(r => ({ zone: r.zone, count: Number(r.count) })),
       yearTrend: yearRows.map(r => ({ year: r.year, count: Number(r.count) })),
     };
   }
@@ -352,18 +357,18 @@ export class DemolitionService implements OnModuleInit {
   // ── List / search demolition properties ──────────────────────────────────────
 
   async findAll(query: { search?: string; zone?: string; page?: number; limit?: number }) {
-    const page  = Math.max(1, Number(query.page ?? 1));
+    const page = Math.max(1, Number(query.page ?? 1));
     const limit = Math.min(100, Math.max(1, Number(query.limit ?? 50)));
-    const skip  = (page - 1) * limit;
+    const skip = (page - 1) * limit;
 
     const where: Prisma.DemolitionPropertyWhereInput = {};
     if (query.zone && query.zone !== 'all') where.zone = query.zone;
     if (query.search) {
       where.OR = [
-        { address:      { contains: query.search, mode: 'insensitive' } },
-        { ownerName:    { contains: query.search, mode: 'insensitive' } },
+        { address: { contains: query.search, mode: 'insensitive' } },
+        { ownerName: { contains: query.search, mode: 'insensitive' } },
         { noticeNumber: { contains: query.search, mode: 'insensitive' } },
-        { locality:     { contains: query.search, mode: 'insensitive' } },
+        { locality: { contains: query.search, mode: 'insensitive' } },
       ];
     }
 
@@ -399,7 +404,7 @@ export class DemolitionService implements OnModuleInit {
       return { matched: 0, alerts: [], skipped: 'non-delhi' };
     }
 
-    const aliases  = await this.loadAliases();
+    const aliases = await this.loadAliases();
     const caseNorm = normalizeAddress(addr, aliases);
 
     const candidates = await this.searchCandidates(caseNorm);
@@ -427,15 +432,15 @@ export class DemolitionService implements OnModuleInit {
         create: {
           caseId,
           demolitionPropertyId: match.id,
-          matchStatus:    match.confidence >= 70 ? 'CONFIRMED' : 'POTENTIAL',
+          matchStatus: match.confidence >= 70 ? 'CONFIRMED' : 'POTENTIAL',
           confidenceScore: match.confidence,
-          matchReason:     match.dominant,
-          reasons:         match.reasons as any,
+          matchReason: match.dominant,
+          reasons: match.reasons as any,
         },
         update: {
           confidenceScore: match.confidence,
-          matchReason:     match.dominant,
-          reasons:         match.reasons as any,
+          matchReason: match.dominant,
+          reasons: match.reasons as any,
         },
       });
       created++;
@@ -444,7 +449,7 @@ export class DemolitionService implements OnModuleInit {
     if (created > 0) {
       await this.prisma.case.update({
         where: { id: caseId },
-        data:  { hasDemolitionAlert: true },
+        data: { hasDemolitionAlert: true },
       });
     }
 
@@ -474,12 +479,12 @@ export class DemolitionService implements OnModuleInit {
   // ── List alerts ───────────────────────────────────────────────────────────────
 
   async getAlerts(query: { status?: string; page?: number; limit?: number }) {
-    const page  = Math.max(1, Number(query.page ?? 1));
+    const page = Math.max(1, Number(query.page ?? 1));
     const limit = Math.min(100, Math.max(1, Number(query.limit ?? 20)));
-    const skip  = (page - 1) * limit;
+    const skip = (page - 1) * limit;
 
     const where: Prisma.DemolitionAlertWhereInput = {};
-    if (query.status === 'open')      where.matchStatus = { not: 'DISMISSED' };
+    if (query.status === 'open') where.matchStatus = { not: 'DISMISSED' };
     if (query.status === 'confirmed') where.matchStatus = 'CONFIRMED';
     if (query.status === 'potential') where.matchStatus = 'POTENTIAL';
     if (query.status === 'dismissed') where.matchStatus = 'DISMISSED';
@@ -517,9 +522,9 @@ export class DemolitionService implements OnModuleInit {
     return this.prisma.demolitionAlert.update({
       where: { id: alertId },
       data: {
-        matchStatus:     status,
-        dismissedById:   status === 'DISMISSED' ? userId : null,
-        dismissedAt:     status === 'DISMISSED' ? new Date() : null,
+        matchStatus: status,
+        dismissedById: status === 'DISMISSED' ? userId : null,
+        dismissedAt: status === 'DISMISSED' ? new Date() : null,
         dismissalReason: reason ?? null,
       },
     });
@@ -532,8 +537,8 @@ export class DemolitionService implements OnModuleInit {
       where: { id: alertId },
       data: {
         humanFeedback: feedback,
-        feedbackBy:    userId,
-        feedbackAt:    new Date(),
+        feedbackBy: userId,
+        feedbackAt: new Date(),
       },
     });
   }
@@ -554,7 +559,7 @@ export class DemolitionService implements OnModuleInit {
         await this.prisma.demolitionAlert.deleteMany({ where: { caseId: c.id } });
         await this.prisma.case.update({
           where: { id: c.id },
-          data:  { hasDemolitionAlert: false },
+          data: { hasDemolitionAlert: false },
         });
         purged++;
       } else {
@@ -584,7 +589,7 @@ export class DemolitionService implements OnModuleInit {
     const full = `${address}${pincode ? ' ' + pincode : ''}`;
     if (isNonDelhiAddress(full)) return { matches: [] };
 
-    const aliases  = await this.loadAliases();
+    const aliases = await this.loadAliases();
     const caseNorm = normalizeAddress(full, aliases);
 
     const candidates = await this.searchCandidates(caseNorm);
@@ -595,14 +600,14 @@ export class DemolitionService implements OnModuleInit {
         caseNorm, dbNorm, ownerName ?? null, dp.ownerName ?? null,
       );
       return {
-        id:           dp.id,
-        address:      dp.address,
-        zone:         dp.zone,
-        locality:     dp.locality,
-        ownerName:    dp.ownerName,
-        noticeDate:   dp.noticeDate,
+        id: dp.id,
+        address: dp.address,
+        zone: dp.zone,
+        locality: dp.locality,
+        ownerName: dp.ownerName,
+        noticeDate: dp.noticeDate,
         noticeNumber: dp.noticeNumber,
-        bookingId:    dp.bookingId,
+        bookingId: dp.bookingId,
         confidence,
         reasons,
         matchReason: dominant,
@@ -625,7 +630,7 @@ export class DemolitionService implements OnModuleInit {
 
   async upsertAlias(alias: string, canonical: string, zone?: string) {
     const result = await this.prisma.addressAlias.upsert({
-      where:  { alias: alias.toUpperCase() },
+      where: { alias: alias.toUpperCase() },
       create: { alias: alias.toUpperCase(), canonical: canonical.toUpperCase(), zone },
       update: { canonical: canonical.toUpperCase(), zone },
     });

@@ -48,4 +48,4 @@ COPY package.json ./
 
 EXPOSE 3001
 
-CMD ["node", "dist/main"]
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node dist/main"]
