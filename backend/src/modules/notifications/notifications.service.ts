@@ -135,22 +135,18 @@ export class NotificationsService {
       return;
     }
 
-    await axios.post(
-      'https://api.resend.com/emails',
-      {
-        from: this.config.get('email.from') || 'onboarding@resend.dev',
-        to: [to],
-        subject,
-        text,
-        html,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-      },
-    );
+    const from = this.config.get<string>('email.from') || 'onboarding@resend.dev';
+    try {
+      const res = await axios.post(
+        'https://api.resend.com/emails',
+        { from, to: [to], subject, text, html },
+        { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } },
+      );
+      this.logger.log(`Email sent: id=${res.data?.id} to=${to}`);
+    } catch (e: any) {
+      const detail = e.response?.data ? JSON.stringify(e.response.data) : e.message;
+      throw new Error(`Resend ${e.response?.status ?? 'ERR'}: ${detail}`);
+    }
   }
 
   private welcomeHtml(_subject: string, text: string): string {
