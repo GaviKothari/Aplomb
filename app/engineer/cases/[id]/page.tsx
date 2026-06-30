@@ -204,6 +204,8 @@ export default function EngineerCaseDetailPage() {
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? [])
     setPhotos(prev => [...prev, ...files])
+    // Reset so the same file can be re-selected / iOS allows another camera shot
+    e.target.value = ''
   }
 
   const handlePhotoUpload = async () => {
@@ -212,6 +214,8 @@ export default function EngineerCaseDetailPage() {
     try {
       await uploadPhotos.mutateAsync({ id, files: photos })
       setPhotos([])
+    } catch {
+      // toast is already shown by the mutation's onError handler
     } finally {
       setUploading(false)
     }
@@ -394,7 +398,6 @@ export default function EngineerCaseDetailPage() {
             type="file"
             accept="image/*"
             multiple
-            capture="environment"
             className="hidden"
             onChange={handlePhotoSelect}
           />
