@@ -1,9 +1,11 @@
 // Runs schema changes that cannot go inside Prisma's transaction wrapper:
 //   - ALTER TYPE ... ADD VALUE (PostgreSQL forbids this inside a transaction)
-//   - The three new employee columns (idempotent with IF NOT EXISTS)
-// Called from the Dockerfile CMD before prisma migrate deploy.
+//   - Column type changes (ALTER TABLE ... TYPE TEXT)
+// Must use DIRECT_URL (non-pooled) — PgBouncer blocks DDL over the pooled URL.
 const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({
+  datasources: { db: { url: process.env.DIRECT_URL || process.env.DATABASE_URL } },
+});
 
 async function exec(sql, label) {
   try {
