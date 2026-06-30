@@ -2,13 +2,14 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, Briefcase, MapPin, Clock, User } from 'lucide-react'
+import { Home, Briefcase, MapPin, Clock, User, CalendarDays } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const NAV = [
   { href: '/engineer',                 label: 'Home',    icon: Home },
   { href: '/engineer/cases',           label: 'Cases',   icon: Briefcase },
   { href: '/engineer/travel-expenses', label: 'Travel',  icon: MapPin },
+  { href: '/engineer/leave',           label: 'Leave',   icon: CalendarDays },
   { href: '/engineer/punch-in-out',    label: 'Punch',   icon: Clock },
   { href: '/engineer/profile',         label: 'Profile', icon: User },
 ]

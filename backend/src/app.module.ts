@@ -29,6 +29,8 @@ import { MisModule } from './modules/mis/mis.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { DemolitionModule } from './modules/demolition/demolition.module';
 import { ReportTemplatesModule } from './modules/report-templates/report-templates.module';
+import { TravelModule } from './modules/travel/travel.module';
+import { LeaveModule } from './modules/leave/leave.module';
 
 @Module({
   imports: [
@@ -67,6 +69,8 @@ import { ReportTemplatesModule } from './modules/report-templates/report-templat
     NotificationsModule,
     DemolitionModule,
     ReportTemplatesModule,
+    TravelModule,
+    LeaveModule,
   ],
 
   providers: [

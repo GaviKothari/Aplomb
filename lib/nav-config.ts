@@ -13,6 +13,7 @@ import {
   Zap,
   LayoutTemplate,
   Upload,
+  CalendarDays,
   type LucideIcon,
 } from 'lucide-react'
 import { UserRole } from '@/types'
@@ -133,6 +134,12 @@ export const navConfig: NavSection[] = [
         href: '/hr-team/travel-expenses',
         icon: MapPin,
         visibleFor: ['admin', 'hr', 'engineer'],
+      },
+      {
+        title: 'Leave Management',
+        href: '/hr-team/leave',
+        icon: CalendarDays,
+        visibleFor: ['admin', 'hr'],
       },
     ],
   },

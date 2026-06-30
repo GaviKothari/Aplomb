@@ -747,6 +747,151 @@ export function useCaseVerification(caseId: string) {
   });
 }
 
+// ── Travel Expenses ───────────────────────────────────────────
+export function useTravelExpenses(params?: any) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ['travel-expenses', params],
+    queryFn: () => api.travel.list(params),
+    staleTime: 30_000,
+  });
+}
+
+export function useMyTravelExpenses(params?: any) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ['travel-expenses-my', params],
+    queryFn: () => api.travel.my(params),
+    staleTime: 30_000,
+  });
+}
+
+export function useSubmitTravelExpense() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { date: string; distanceKm: number; description?: string }) =>
+      api.travel.submit(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['travel-expenses-my'] });
+      toast.success('Expense submitted');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+}
+
+export function useApproveTravelExpense() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.travel.approve(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['travel-expenses'] });
+      toast.success('Expense approved');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+}
+
+export function useRejectTravelExpense() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.travel.reject(id, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['travel-expenses'] });
+      toast.success('Expense rejected');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+}
+
+// ── Leave ─────────────────────────────────────────────────────
+export function useLeaveRequests(params?: any) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ['leave-requests', params],
+    queryFn: () => api.leave.list(params),
+    staleTime: 30_000,
+  });
+}
+
+export function useMyLeave() {
+  const api = useApi();
+  return useQuery({
+    queryKey: ['leave-my'],
+    queryFn: () => api.leave.my(),
+    staleTime: 30_000,
+  });
+}
+
+export function useLeaveBalance() {
+  const api = useApi();
+  return useQuery({
+    queryKey: ['leave-balance'],
+    queryFn: () => api.leave.balance(),
+    staleTime: 60_000,
+  });
+}
+
+export function useApplyLeave() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { leaveType: string; startDate: string; endDate: string; reason: string }) =>
+      api.leave.apply(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['leave-my'] });
+      qc.invalidateQueries({ queryKey: ['leave-balance'] });
+      toast.success('Leave application submitted');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+}
+
+export function useApproveLeave() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, note }: { id: string; note?: string }) =>
+      api.leave.approve(id, note),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['leave-requests'] });
+      toast.success('Leave approved');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+}
+
+export function useRejectLeave() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, note }: { id: string; note: string }) =>
+      api.leave.reject(id, note),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['leave-requests'] });
+      toast.success('Leave rejected');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+}
+
+export function useCancelLeave() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.leave.cancel(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['leave-my'] });
+      qc.invalidateQueries({ queryKey: ['leave-balance'] });
+      toast.success('Leave cancelled');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+}
+
 // ── Finalize case ─────────────────────────────────────────────
 export function useFinalizeCase() {
   const api = useApi();

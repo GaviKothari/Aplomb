@@ -214,6 +214,29 @@ export function createApiClient(getToken: () => Promise<string | null>) {
       cleanupNonDelhi: () => api<any>('/demolition/cleanup-non-delhi', { method: 'POST' }),
     },
 
+    // Travel Expenses
+    travel: {
+      list:    (p?: any)   => api<any>('/travel-expenses', { params: p }),
+      my:      (p?: any)   => api<any>('/travel-expenses/my', { params: p }),
+      submit:  (body: any) => api<any>('/travel-expenses', { method: 'POST', body }),
+      approve: (id: string) => api<any>(`/travel-expenses/${id}/approve`, { method: 'PATCH' }),
+      reject:  (id: string, reason: string) =>
+        api<any>(`/travel-expenses/${id}/reject`, { method: 'PATCH', body: { reason } }),
+    },
+
+    // Leave
+    leave: {
+      list:    (p?: any)   => api<any>('/leave', { params: p }),
+      my:      ()          => api<any>('/leave/my'),
+      balance: ()          => api<any>('/leave/balance'),
+      apply:   (body: any) => api<any>('/leave', { method: 'POST', body }),
+      approve: (id: string, note?: string) =>
+        api<any>(`/leave/${id}/approve`, { method: 'PATCH', body: { note } }),
+      reject:  (id: string, note: string) =>
+        api<any>(`/leave/${id}/reject`, { method: 'PATCH', body: { note } }),
+      cancel:  (id: string) => api<any>(`/leave/${id}/cancel`, { method: 'PATCH' }),
+    },
+
     // MIS
     mis: {
       snapshot: () => api<any>('/mis/snapshot'),

@@ -1,358 +1,227 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import { AppLayout } from '@/components/layout/app-layout'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { MapPin, TrendingUp, Download, Filter, RotateCcw, CheckCircle2, Clock, AlertCircle, DollarSign } from 'lucide-react'
-import { mockTravelLogs, mockExpenseApprovals } from '@/lib/mock-data'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from '@/components/ui/table'
+import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
+import { useTravelExpenses, useApproveTravelExpense, useRejectTravelExpense } from '@/lib/api/hooks'
+import {
+  Navigation, DollarSign, Clock, CheckCircle2, XCircle, RotateCcw,
+} from 'lucide-react'
 
-export default function TravelExpensesPage() {
-  const [selectedEngineer, setSelectedEngineer] = useState<string>('all')
-  const [selectedStatus, setSelectedStatus] = useState<string>('all')
+const STATUS_META: Record<string, { label: string; cls: string }> = {
+  PENDING:  { label: 'Pending',  cls: 'bg-amber-100 text-amber-800' },
+  APPROVED: { label: 'Approved', cls: 'bg-blue-100 text-blue-800' },
+  PAID:     { label: 'Paid',     cls: 'bg-emerald-100 text-emerald-800' },
+  REJECTED: { label: 'Rejected', cls: 'bg-red-100 text-red-800' },
+}
+
+export default function HRTravelExpensesPage() {
+  const [status, setStatus] = useState('all')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [rejectTarget, setRejectTarget] = useState<{ id: string; name: string } | null>(null)
+  const [rejectReason, setRejectReason] = useState('')
 
-  // Extract unique engineers and statuses
-  const engineers = ['all', ...new Set(mockTravelLogs.map((t) => t.engineerName))]
-  const statuses = ['all', 'pending', 'approved', 'paid', 'rejected']
+  const { data, isLoading } = useTravelExpenses({
+    status: status !== 'all' ? status : undefined,
+    dateFrom: dateFrom || undefined,
+    dateTo: dateTo || undefined,
+    limit: 50,
+  })
 
-  // Filter travel logs
-  const filteredTravelLogs = useMemo(() => {
-    return mockTravelLogs.filter((log) => {
-      if (selectedEngineer !== 'all' && log.engineerName !== selectedEngineer) return false
-      if (selectedStatus !== 'all' && log.status !== selectedStatus) return false
-      if (dateFrom && log.date < dateFrom) return false
-      if (dateTo && log.date > dateTo) return false
-      return true
-    })
-  }, [selectedEngineer, selectedStatus, dateFrom, dateTo])
+  const approve = useApproveTravelExpense()
+  const reject = useRejectTravelExpense()
 
-  // Calculate summary metrics
-  const metrics = useMemo(() => {
-    const totalDistance = filteredTravelLogs.reduce((sum, log) => sum + log.distanceKm, 0)
-    const totalExpense = filteredTravelLogs.reduce((sum, log) => sum + log.totalExpense, 0)
-    const pendingCount = filteredTravelLogs.filter((log) => log.status === 'pending').length
-    const approvedCount = filteredTravelLogs.filter((log) => log.status === 'approved').length
-    const pendingExpense = filteredTravelLogs
-      .filter((log) => log.status === 'pending')
-      .reduce((sum, log) => sum + log.totalExpense, 0)
+  const expenses: any[] = data?.data ?? []
+  const stats = data?.stats
 
-    return { totalDistance, totalExpense, pendingCount, approvedCount, pendingExpense }
-  }, [filteredTravelLogs])
-
-  // Group by engineer for daily/monthly summary
-  const engineerSummary = useMemo(() => {
-    const grouped: { [key: string]: { distance: number; expense: number; trips: number } } = {}
-    filteredTravelLogs.forEach((log) => {
-      if (!grouped[log.engineerName]) {
-        grouped[log.engineerName] = { distance: 0, expense: 0, trips: 0 }
-      }
-      grouped[log.engineerName].distance += log.distanceKm
-      grouped[log.engineerName].expense += log.totalExpense
-      grouped[log.engineerName].trips += 1
-    })
-    return Object.entries(grouped).map(([name, data]) => ({
-      name,
-      distance: Math.round(data.distance * 10) / 10,
-      expense: data.expense,
-      trips: data.trips,
-      avgDistancePerTrip: Math.round((data.distance / data.trips) * 10) / 10,
-    }))
-  }, [filteredTravelLogs])
-
-  const handleReset = () => {
-    setSelectedEngineer('all')
-    setSelectedStatus('all')
-    setDateFrom('')
-    setDateTo('')
-  }
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'pending':
-        return 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300'
-      case 'approved':
-        return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300'
-      case 'paid':
-        return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-300'
-      case 'rejected':
-        return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'
-      default:
-        return 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300'
-    }
-  }
+  const totalKm     = Number(stats?._sum?.distanceKm ?? 0)
+  const totalAmount = Number(stats?._sum?.amount ?? 0)
+  const pending     = expenses.filter(e => e.status === 'PENDING').length
+  const pendingAmt  = expenses.filter(e => e.status === 'PENDING').reduce((s: number, e: any) => s + Number(e.amount), 0)
 
   return (
     <AppLayout>
       <div className="space-y-6">
-        {/* Header */}
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Travel & Expenses Management</h1>
-          <p className="text-muted-foreground mt-2">
-            Track engineer travel distance, manage fuel reimbursements, and process expense approvals
-          </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Travel & Expenses</h1>
+            <p className="text-muted-foreground mt-1 text-sm">Review and approve engineer travel reimbursements</p>
+          </div>
         </div>
 
-        {/* Summary Cards */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-          <Card>
-            <CardContent className="pt-6">
-              <p className="text-xs text-muted-foreground mb-1">Total Distance</p>
-              <div className="flex items-baseline gap-2">
-                <p className="text-2xl font-bold">{metrics.totalDistance.toFixed(1)}</p>
-                <p className="text-xs text-muted-foreground">km</p>
+        {/* Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: 'Total Distance', value: `${totalKm.toFixed(1)} km`, icon: Navigation, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-900/20' },
+            { label: 'Total Amount',   value: `₹${totalAmount.toLocaleString('en-IN')}`, icon: DollarSign, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-900/20' },
+            { label: 'Pending',        value: `${pending} (₹${pendingAmt.toLocaleString('en-IN')})`, icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50 dark:bg-amber-900/20' },
+            { label: 'Rate',           value: '₹8/km', icon: CheckCircle2, color: 'text-purple-600', bg: 'bg-purple-50 dark:bg-purple-900/20' },
+          ].map(s => (
+            <div key={s.label} className={`${s.bg} rounded-xl p-4 flex items-center gap-3 border border-transparent`}>
+              <div className="w-9 h-9 rounded-lg bg-white/60 dark:bg-black/20 flex items-center justify-center shrink-0">
+                <s.icon className={`w-4 h-4 ${s.color}`} />
               </div>
-              <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-2">{filteredTravelLogs.length} trips</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-2 mb-1">
-                <DollarSign className="w-4 h-4 text-blue-600" />
-                <p className="text-xs text-muted-foreground">Total Expense</p>
+              <div>
+                <p className={`text-base font-bold ${s.color}`}>{s.value}</p>
+                <p className="text-xs text-muted-foreground">{s.label}</p>
               </div>
-              <p className="text-2xl font-bold">₹{metrics.totalExpense.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground mt-2">All statuses</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-2 mb-1">
-                <Clock className="w-4 h-4 text-amber-600" />
-                <p className="text-xs text-muted-foreground">Pending</p>
-              </div>
-              <p className="text-2xl font-bold">{metrics.pendingCount}</p>
-              <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">₹{metrics.pendingExpense.toLocaleString()}</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-2 mb-1">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <p className="text-xs text-muted-foreground">Approved</p>
-              </div>
-              <p className="text-2xl font-bold">{metrics.approvedCount}</p>
-              <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-2">Ready for payment</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-2 mb-1">
-                <TrendingUp className="w-4 h-4 text-blue-600" />
-                <p className="text-xs text-muted-foreground">Avg Rate</p>
-              </div>
-              <p className="text-2xl font-bold">₹8/km</p>
-              <p className="text-xs text-muted-foreground mt-2">Fixed fuel rate</p>
-            </CardContent>
-          </Card>
+            </div>
+          ))}
         </div>
 
         {/* Filters */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Filter className="w-4 h-4" />
-              Filters
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-              <div>
-                <label className="text-sm font-medium block mb-2">Engineer</label>
-                <select
-                  value={selectedEngineer}
-                  onChange={(e) => setSelectedEngineer(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-slate-950 text-sm"
-                >
-                  {engineers.map((eng) => (
-                    <option key={eng} value={eng}>
-                      {eng === 'all' ? 'All Engineers' : eng}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium block mb-2">Status</label>
-                <select
-                  value={selectedStatus}
-                  onChange={(e) => setSelectedStatus(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-slate-950 text-sm"
-                >
-                  {statuses.map((status) => (
-                    <option key={status} value={status}>
-                      {status === 'all' ? 'All Status' : status.charAt(0).toUpperCase() + status.slice(1)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium block mb-2">From Date</label>
-                <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="text-sm" />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium block mb-2">To Date</label>
-                <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="text-sm" />
-              </div>
-
-              <div className="flex gap-2 items-end">
-                <Button variant="outline" size="sm" onClick={handleReset} className="gap-2">
-                  <RotateCcw className="w-4 h-4" />
-                  Reset
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Travel Logs Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Travel Logs</CardTitle>
-            <CardDescription>Detailed travel and expense records ({filteredTravelLogs.length} entries)</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left py-3 px-4 font-semibold">Engineer</th>
-                    <th className="text-left py-3 px-4 font-semibold">Case ID</th>
-                    <th className="text-left py-3 px-4 font-semibold">Property Location</th>
-                    <th className="text-center py-3 px-4 font-semibold">Distance (km)</th>
-                    <th className="text-center py-3 px-4 font-semibold">Fuel Rate</th>
-                    <th className="text-right py-3 px-4 font-semibold">Total Expense</th>
-                    <th className="text-left py-3 px-4 font-semibold">Date</th>
-                    <th className="text-left py-3 px-4 font-semibold">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredTravelLogs.map((log) => (
-                    <tr key={log.id} className="border-b hover:bg-muted/50 transition-colors">
-                      <td className="py-3 px-4 font-medium">{log.engineerName}</td>
-                      <td className="py-3 px-4 text-muted-foreground">{log.caseId}</td>
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-1">
-                          <MapPin className="w-4 h-4 text-blue-600" />
-                          <span className="text-xs">{log.propertyLocation}</span>
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 text-center font-medium">{log.distanceKm}</td>
-                      <td className="py-3 px-4 text-center">₹{log.fuelRatePerKm}/km</td>
-                      <td className="py-3 px-4 text-right font-semibold">₹{log.totalExpense}</td>
-                      <td className="py-3 px-4 text-muted-foreground text-xs">{log.date}</td>
-                      <td className="py-3 px-4">
-                        <Badge className={getStatusColor(log.status)}>
-                          {log.status.charAt(0).toUpperCase() + log.status.slice(1)}
-                        </Badge>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Engineer Summary */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Engineer Summary</CardTitle>
-            <CardDescription>Total distance and expenses per engineer</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {engineerSummary.map((summary, idx) => (
-                <div key={idx} className="border rounded-lg p-4 space-y-3">
-                  <div>
-                    <p className="font-semibold text-sm mb-1">{summary.name}</p>
-                    <div className="space-y-1 text-xs text-muted-foreground">
-                      <p>Total Distance: <span className="font-semibold text-foreground">{summary.distance} km</span></p>
-                      <p>Total Expense: <span className="font-semibold text-foreground">₹{summary.expense}</span></p>
-                      <p>Trips: <span className="font-semibold text-foreground">{summary.trips}</span></p>
-                      <p>Avg per Trip: <span className="font-semibold text-foreground">{summary.avgDistancePerTrip} km</span></p>
-                    </div>
-                  </div>
-                  <div className="pt-2 border-t">
-                    <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
-                      <div
-                        className="bg-blue-600 h-2 rounded-full"
-                        style={{ width: `${Math.min((summary.distance / metrics.totalDistance) * 100, 100)}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
+        <div className="flex flex-wrap gap-3">
+          <Select value={status} onValueChange={setStatus}>
+            <SelectTrigger className="w-36 h-9">
+              <SelectValue placeholder="All Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Status</SelectItem>
+              {Object.entries(STATUS_META).map(([k, m]) => (
+                <SelectItem key={k} value={k}>{m.label}</SelectItem>
               ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Expense Approval Panel */}
-        <Card className="border-l-4 border-l-amber-500">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <AlertCircle className="w-5 h-5 text-amber-600" />
-              Pending Approvals ({mockExpenseApprovals.filter((a) => a.status === 'pending').length})
-            </CardTitle>
-            <CardDescription>Expense reimbursements awaiting approval</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {mockExpenseApprovals.filter((a) => a.status === 'pending').map((approval) => (
-                <div key={approval.id} className="border rounded-lg p-4 flex justify-between items-start">
-                  <div className="flex-1">
-                    <p className="font-semibold text-sm mb-2">{approval.engineerName}</p>
-                    <div className="grid grid-cols-3 gap-4 text-xs">
-                      <div>
-                        <p className="text-muted-foreground">Total Distance</p>
-                        <p className="font-semibold text-base">{approval.totalDistance} km</p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground">Total Expense</p>
-                        <p className="font-semibold text-base">₹{approval.totalExpense}</p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground">Trips</p>
-                        <p className="font-semibold text-base">{approval.travelLogIds.length}</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex gap-2 ml-4">
-                    <Button size="sm" className="gap-1">
-                      <CheckCircle2 className="w-4 h-4" />
-                      Approve
-                    </Button>
-                    <Button size="sm" variant="outline">
-                      Reject
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Export Section */}
-        <div className="flex gap-3 justify-end">
-          <Button variant="outline" className="gap-2">
-            <Download className="w-4 h-4" />
-            Export as PDF
-          </Button>
-          <Button variant="outline" className="gap-2">
-            <Download className="w-4 h-4" />
-            Export as Excel
+            </SelectContent>
+          </Select>
+          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+            className="w-40 h-9 text-sm" placeholder="From" />
+          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+            className="w-40 h-9 text-sm" placeholder="To" />
+          <Button variant="ghost" size="sm" className="h-9 gap-1.5"
+            onClick={() => { setStatus('all'); setDateFrom(''); setDateTo('') }}>
+            <RotateCcw className="w-3.5 h-3.5" />Reset
           </Button>
         </div>
+
+        {/* Table */}
+        <Card className="border-border/60 shadow-sm overflow-hidden">
+          {isLoading ? (
+            <div className="p-6 space-y-3">
+              {[1,2,3,4,5].map(i => <Skeleton key={i} className="h-10 w-full" />)}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/30 hover:bg-muted/30">
+                    <TableHead className="text-xs font-semibold uppercase tracking-wide py-3">Engineer</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wide">Date</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wide">Description</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wide text-right">Distance</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wide text-right">Amount</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wide">Status</TableHead>
+                    <TableHead />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {expenses.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center py-16 text-muted-foreground text-sm">
+                        No expenses match your filters
+                      </TableCell>
+                    </TableRow>
+                  ) : expenses.map((exp: any) => {
+                    const meta = STATUS_META[exp.status] ?? { label: exp.status, cls: 'bg-gray-100 text-gray-700' }
+                    const name = exp.employee?.user?.name ?? exp.employee?.employeeCode ?? '—'
+                    return (
+                      <TableRow key={exp.id} className="border-border/40 hover:bg-muted/30">
+                        <TableCell className="py-3 text-sm font-medium">{name}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                          {new Date(exp.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground max-w-xs truncate">
+                          {exp.description ?? '—'}
+                        </TableCell>
+                        <TableCell className="text-sm text-right tabular-nums">
+                          {Number(exp.distanceKm).toFixed(1)} km
+                        </TableCell>
+                        <TableCell className="text-sm font-semibold text-right tabular-nums">
+                          ₹{Number(exp.amount).toLocaleString('en-IN')}
+                        </TableCell>
+                        <TableCell>
+                          <Badge className={`text-xs font-normal ${meta.cls}`}>{meta.label}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          {exp.status === 'PENDING' && (
+                            <div className="flex gap-1">
+                              <Button
+                                size="sm" variant="ghost"
+                                className="h-7 text-xs text-emerald-700 hover:bg-emerald-50"
+                                disabled={approve.isPending}
+                                onClick={() => approve.mutate(exp.id)}
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5 mr-1" />Approve
+                              </Button>
+                              <Button
+                                size="sm" variant="ghost"
+                                className="h-7 text-xs text-red-600 hover:bg-red-50"
+                                onClick={() => setRejectTarget({ id: exp.id, name })}
+                              >
+                                <XCircle className="w-3.5 h-3.5 mr-1" />Reject
+                              </Button>
+                            </div>
+                          )}
+                          {exp.approvalNote && exp.status === 'REJECTED' && (
+                            <p className="text-xs text-muted-foreground max-w-32 truncate" title={exp.approvalNote}>
+                              {exp.approvalNote}
+                            </p>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </Card>
       </div>
+
+      {/* Reject dialog */}
+      <Dialog open={!!rejectTarget} onOpenChange={o => { if (!o) { setRejectTarget(null); setRejectReason('') } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reject Expense — {rejectTarget?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <Input
+              placeholder="Reason for rejection…"
+              value={rejectReason}
+              onChange={e => setRejectReason(e.target.value)}
+            />
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => { setRejectTarget(null); setRejectReason('') }}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive" className="flex-1"
+                disabled={!rejectReason || reject.isPending}
+                onClick={async () => {
+                  if (!rejectTarget) return
+                  await reject.mutateAsync({ id: rejectTarget.id, reason: rejectReason })
+                  setRejectTarget(null)
+                  setRejectReason('')
+                }}
+              >
+                Reject
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   )
 }
