@@ -17,6 +17,7 @@ export class StorageService {
     this.s3 = new S3Client({
       region: 'auto',
       endpoint: config.get<string>('r2.endpoint'),
+      forcePathStyle: true, // R2 requires path-style; virtual-hosted causes SSL mismatch
       credentials: {
         accessKeyId: config.get<string>('r2.accessKeyId') ?? '',
         secretAccessKey: config.get<string>('r2.secretAccessKey') ?? '',
