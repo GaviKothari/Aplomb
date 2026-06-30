@@ -20,7 +20,7 @@ import {
 } from '@/lib/api/hooks'
 import {
   User, Briefcase, FileText, Upload, Trash2, CheckCircle2, Loader2,
-  AlertCircle, Eye, IndianRupee, Phone, Mail, Building2, Calendar,
+  AlertCircle, Eye, IndianRupee, Phone, Mail, Building2, Calendar, MailCheck, MailWarning,
 } from 'lucide-react'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -193,9 +193,10 @@ export function EmployeeFormDialog({ open, onOpenChange, employee }: Props) {
   const [tab, setTab] = useState('personal')
   const [form, setForm] = useState(blankForm())
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [inviteResult, setInviteResult] = useState<{ email: string; sent: boolean; error?: string } | null>(null)
 
   useEffect(() => {
-    if (!open) { setTab('personal'); setErrors({}); return }
+    if (!open) { setTab('personal'); setErrors({}); setInviteResult(null); return }
     if (employee) {
       setForm({
         name: employee.user?.name ?? '',
@@ -290,14 +291,67 @@ export function EmployeeFormDialog({ open, onOpenChange, employee }: Props) {
     }
     if (isEdit) {
       await update.mutateAsync({ id: employee.id, ...payload })
+      onOpenChange(false)
     } else {
-      await create.mutateAsync(payload)
+      const result = await create.mutateAsync(payload)
+      setInviteResult({
+        email: payload.email,
+        sent: result?.clerkInviteSent ?? false,
+        error: result?.clerkInviteError,
+      })
     }
-    onOpenChange(false)
   }
 
   const busy = create.isPending || update.isPending
   const ctaLabel = busy ? 'Saving…' : isEdit ? 'Save Changes' : 'Add Employee'
+
+  // Show invite result screen after creation
+  if (inviteResult) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-sm">
+          <div className="flex flex-col items-center text-center gap-4 py-4">
+            {inviteResult.sent ? (
+              <>
+                <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center">
+                  <MailCheck className="w-8 h-8 text-emerald-600" />
+                </div>
+                <div>
+                  <p className="text-lg font-semibold">Employee Added!</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    A login invitation has been sent to
+                  </p>
+                  <p className="text-sm font-medium text-blue-600 mt-0.5">{inviteResult.email}</p>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    They'll receive an email from Clerk with a link to set up their password and access the platform.
+                  </p>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center">
+                  <MailWarning className="w-8 h-8 text-amber-600" />
+                </div>
+                <div>
+                  <p className="text-lg font-semibold">Employee Added</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    But the login invite to <span className="font-medium">{inviteResult.email}</span> could not be sent automatically.
+                  </p>
+                  {inviteResult.error && (
+                    <p className="text-xs text-red-500 mt-2 font-mono bg-red-50 rounded p-2">{inviteResult.error}</p>
+                  )}
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Use the Send button (✈) on the employee row to retry, or send an invite manually from the Clerk dashboard.
+                  </p>
+                </div>
+              </>
+            )}
+            <Button className="w-full" onClick={() => onOpenChange(false)}>Done</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    )
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

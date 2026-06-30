@@ -85,12 +85,12 @@ export class EmployeesService {
       },
     });
 
-    // Fire-and-forget: send Clerk invite so employee can log in + in-app welcome
+    // Send Clerk invite (await so caller knows if it succeeded)
     const userRole = (employee as any).user?.role ?? dto.role ?? 'ENGINEER';
-    this.sendClerkInvitation((employee as any).user.email, userRole).catch(() => null);
+    const inviteResult = await this.sendClerkInvitation((employee as any).user.email, userRole);
     this.sendWelcome(employee).catch(() => null);
 
-    return employee;
+    return { ...employee, clerkInviteSent: inviteResult.success, clerkInviteError: inviteResult.error };
   }
 
   async resendWelcome(employeeId: string) {
@@ -102,40 +102,37 @@ export class EmployeesService {
     });
     if (!employee) throw new NotFoundException('Employee not found');
 
-    // Re-send Clerk invite only if they haven't linked a Clerk account yet
+    let clerkInviteSent = false;
     if (!(employee as any).user.clerkId) {
-      await this.sendClerkInvitation((employee as any).user.email, (employee as any).user.role);
+      const result = await this.sendClerkInvitation((employee as any).user.email, (employee as any).user.role);
+      clerkInviteSent = result.success;
     }
     await this.sendWelcome(employee);
-    return { sent: true, to: (employee as any).user.email };
+    return { sent: true, to: (employee as any).user.email, clerkInviteSent };
   }
 
-  private async sendClerkInvitation(email: string, role: string): Promise<void> {
+  private async sendClerkInvitation(email: string, role: string): Promise<{ success: boolean; error?: string }> {
     const secretKey = this.config.get<string>('clerk.secretKey');
     if (!secretKey) {
       this.logger.warn('CLERK_SECRET_KEY not set — skipping Clerk invitation');
-      return;
+      return { success: false, error: 'CLERK_SECRET_KEY not configured' };
     }
     try {
       await axios.post(
         'https://api.clerk.com/v1/invitations',
-        {
-          email_address: email,
-          public_metadata: { role },
-          redirect_url: 'https://app.aplomb.in',
-          notify: true,
-        },
+        { email_address: email, public_metadata: { role } },
         { headers: { Authorization: `Bearer ${secretKey}`, 'Content-Type': 'application/json' } },
       );
       this.logger.log(`Clerk invitation sent to ${email}`);
+      return { success: true };
     } catch (e: any) {
       const msg = e.response?.data?.errors?.[0]?.long_message ?? e.response?.data?.errors?.[0]?.message ?? e.message;
-      // "already invited" is not a real error — the invite already exists
       if (e.response?.status === 422 && msg?.toLowerCase().includes('already')) {
         this.logger.log(`Clerk invitation already exists for ${email}`);
-      } else {
-        this.logger.error(`Clerk invitation failed for ${email}: ${msg}`);
+        return { success: true };
       }
+      this.logger.error(`Clerk invitation failed for ${email}: ${JSON.stringify(e.response?.data ?? msg)}`);
+      return { success: false, error: msg };
     }
   }
 
