@@ -221,7 +221,6 @@ const Q: Record<string, Question> = {
   },
 }
 
-// All question IDs in rough order — used only for progress %
 const ORDERED = [
   'propertyType', 'constructionStage', 'totalFloors', 'bhkType', 'commercialUsage',
   'plotBoundary', 'amenities', 'roadWidth', 'facingDirection', 'totalArea',
@@ -234,12 +233,10 @@ function pct(qId: string) {
   return Math.max(5, Math.round(((i + 1) / ORDERED.length) * 100))
 }
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 interface Msg { id: string; role: 'bot' | 'user'; text: string }
 function uid() { return Math.random().toString(36).slice(2) }
 
-// ── Page ─────────────────────────────────────────────────────────────────────
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function InspectPage() {
   const { id } = useParams<{ id: string }>()
@@ -263,10 +260,25 @@ export default function InspectPage() {
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const numRef = useRef<HTMLInputElement>(null)
+  const txtRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [msgs, qId])
+
+  // When a number/text input appears, wait for layout then scroll it into view
+  useEffect(() => {
+    if (!curQ) return
+    const el = curQ.type === 'number' ? numRef.current : curQ.type === 'text' ? txtRef.current : null
+    if (!el) return
+    const t = setTimeout(() => {
+      el.focus()
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }, 100)
+    return () => clearTimeout(t)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qId])
 
   function bot(text: string) {
     setMsgs(p => [...p, { id: uid(), role: 'bot', text }])
@@ -332,7 +344,8 @@ export default function InspectPage() {
   if (done) {
     const entries = Object.entries(answers).filter(([k]) => !k.startsWith('_'))
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      // h-[100dvh]: shrinks with keyboard; overflow-hidden prevents page-level scroll
+      <div className="h-[100dvh] bg-gray-50 flex flex-col overflow-hidden">
         <div className="bg-[#075E54] text-white px-4 py-3 flex items-center gap-3 shrink-0">
           <button onClick={() => setDone(false)} className="text-white/70 active:opacity-70">
             <ChevronLeft className="w-6 h-6" />
@@ -346,7 +359,8 @@ export default function InspectPage() {
           </span>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4">
+        {/* min-h-0 is required so flex-1 can actually shrink below its content size */}
+        <div className="flex-1 min-h-0 overflow-y-auto p-4">
           <div className="bg-white rounded-2xl shadow-sm overflow-hidden divide-y divide-gray-100">
             {entries.map(([k, v]) => (
               <div key={k} className="flex items-start justify-between px-4 py-3 gap-4">
@@ -382,11 +396,13 @@ export default function InspectPage() {
     )
   }
 
-  // ── Chat ─────────────────────────────────────────────────────────────────────
+  // ── Chat ──────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#E5DDD5]">
-      {/* Header */}
+    // h-[100dvh]: dynamic viewport height adjusts automatically when keyboard opens
+    // overflow-hidden: prevent outer page scroll; only messages div scrolls
+    <div className="h-[100dvh] flex flex-col overflow-hidden bg-[#E5DDD5]">
+      {/* Header — fixed at top */}
       <div className="bg-[#075E54] text-white px-4 py-3 flex items-center gap-3 shrink-0 shadow">
         <Link href={`/engineer/cases/${id}`} className="text-white/70 active:opacity-70">
           <ChevronLeft className="w-6 h-6" />
@@ -416,8 +432,8 @@ export default function InspectPage() {
         </div>
       )}
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-3 py-4 space-y-1.5">
+      {/* Messages — flex-1 + min-h-0 lets this shrink when keyboard opens */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-1.5">
         {!started && (
           <div className="space-y-3">
             <div className="bg-white rounded-2xl rounded-tl-none px-4 py-4 shadow-sm max-w-[90%] text-sm text-gray-800 space-y-2 leading-relaxed">
@@ -450,7 +466,7 @@ export default function InspectPage() {
         <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
+      {/* Input panel — shrink-0 keeps it anchored at the bottom */}
       {curQ && (
         <div className="bg-white border-t border-gray-100 shrink-0">
           {curQ.hint && (
@@ -510,22 +526,22 @@ export default function InspectPage() {
             </div>
           )}
 
-          {/* Number */}
+          {/* Number — ref-focused after a delay so layout settles before keyboard opens */}
           {curQ.type === 'number' && (
             <div className="p-3 flex items-center gap-2">
               <div className="flex-1 relative">
                 <input
+                  ref={numRef}
                   type="number"
                   inputMode="decimal"
                   value={numVal}
                   onChange={e => setNumVal(e.target.value)}
-                  placeholder={`Enter value…`}
+                  placeholder="Enter value…"
                   onKeyDown={e =>
                     e.key === 'Enter' && numVal &&
                     advance(curQ.id, numVal, `${numVal} ${curQ.unit ?? ''}`.trim())
                   }
                   className="w-full bg-[#F0F2F5] rounded-full px-4 py-2.5 pr-20 text-sm outline-none"
-                  autoFocus
                 />
                 {curQ.unit && (
                   <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">
@@ -545,15 +561,16 @@ export default function InspectPage() {
             </div>
           )}
 
-          {/* Text */}
+          {/* Text — single row, expands up to 3 lines, then scrolls */}
           {curQ.type === 'text' && (
             <div className="p-3 flex items-end gap-2">
               <textarea
+                ref={txtRef}
                 value={txtVal}
                 onChange={e => setTxtVal(e.target.value)}
                 placeholder="Type here…"
-                rows={2}
-                className="flex-1 bg-[#F0F2F5] rounded-2xl px-4 py-2.5 text-sm outline-none resize-none"
+                rows={1}
+                className="flex-1 bg-[#F0F2F5] rounded-2xl px-4 py-2.5 text-sm outline-none resize-none max-h-20 overflow-y-auto"
               />
               <div className="flex flex-col gap-1 shrink-0">
                 <button
