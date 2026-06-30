@@ -106,7 +106,18 @@ export class JwtAuthGuard implements CanActivate {
           where: { userId: preCreated.id },
           data: { invitationStatus: 'ACCEPTED' },
         });
-        this.logger.log(`Linked Clerk ${clerkId} to pre-created user ${email}`);
+        // Push the DB role into Clerk public_metadata so the JWT carries the right
+        // role claim on the next request. Fire-and-forget — don't block the login.
+        axios.patch(
+          `https://api.clerk.com/v1/users/${clerkId}/metadata`,
+          { public_metadata: { role: user.role } },
+          { headers: { Authorization: `Bearer ${secretKey}` } },
+        ).then(() => {
+          this.logger.log(`Synced role ${user.role} to Clerk for ${email}`);
+        }).catch(e => {
+          this.logger.error(`Failed to sync role to Clerk for ${email}: ${e.message}`);
+        });
+        this.logger.log(`Linked Clerk ${clerkId} to pre-created user ${email} (role: ${user.role})`);
         return user;
       }
 
