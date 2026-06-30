@@ -75,9 +75,13 @@ export class EmployeesService {
         errBody?.errors?.[0]?.message ??
         e.message;
 
-      // Clerk returns 422 "already invited" — treat as success (invitation still pending)
-      if (e.response?.status === 422 && msg.toLowerCase().includes('already')) {
-        this.logger.log(`Clerk invitation already exists for ${email}`);
+      // Clerk 422 duplicate_record — invitation already pending, treat as success
+      const isDuplicate =
+        errBody?.errors?.[0]?.code === 'duplicate_record' ||
+        msg.toLowerCase().includes('already') ||
+        msg.toLowerCase().includes('duplicate');
+      if (e.response?.status === 422 && isDuplicate) {
+        this.logger.log(`Clerk invitation already pending for ${email}`);
         return { success: true };
       }
 
@@ -85,6 +89,27 @@ export class EmployeesService {
         `Clerk invitation failed for ${email}: ${JSON.stringify(errBody ?? msg)}`,
       );
       return { success: false, error: msg };
+    }
+  }
+
+  /** Revoke all pending Clerk invitations for an email so a fresh one can be sent. */
+  private async revokeExistingInvitations(email: string): Promise<void> {
+    if (!this.clerkSecret) return;
+    try {
+      const res = await clerkRequest<{ data: Array<{ id: string; email_address: string }> }>(
+        this.clerkSecret, 'GET', '/invitations?status=pending',
+      );
+      const matching = (res.data ?? []).filter(
+        inv => inv.email_address.toLowerCase() === email.toLowerCase(),
+      );
+      await Promise.all(
+        matching.map(inv =>
+          clerkRequest(this.clerkSecret, 'POST', `/invitations/${inv.id}/revoke`).catch(() => {}),
+        ),
+      );
+      if (matching.length) this.logger.log(`Revoked ${matching.length} pending invitation(s) for ${email}`);
+    } catch (e: any) {
+      this.logger.warn(`Could not revoke invitations for ${email}: ${e.message}`);
     }
   }
 
@@ -218,6 +243,9 @@ export class EmployeesService {
         reason: 'Employee already has a Clerk account. They can reset their password at app.aplomb.in.',
       };
     }
+
+    // Revoke any pending invitation first so Clerk doesn't reject as duplicate
+    await this.revokeExistingInvitations(user.email);
 
     const inviteResult = await this.sendClerkInvitation(user.email, user.role);
 

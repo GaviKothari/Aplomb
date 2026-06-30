@@ -92,35 +92,58 @@ export class JwtAuthGuard implements CanActivate {
       const lastName = clerkUser.last_name ?? '';
       const name = [firstName, lastName].filter(Boolean).join(' ') || email;
 
-      // If admin pre-created this user by email (no clerkId yet), link them
+      // Case-insensitive lookup — admin may have entered email with different casing
+      // than Clerk's normalised lowercase address.
       const preCreated = await this.prisma.user.findFirst({
-        where: { email, clerkId: null },
+        where: { email: { equals: email, mode: 'insensitive' }, clerkId: null },
       });
       if (preCreated) {
         const user = await this.prisma.user.update({
           where: { id: preCreated.id },
           data: { clerkId, avatarUrl: clerkUser.image_url, lastLoginAt: new Date() },
         });
+        await this.prisma.employee.updateMany({
+          where: { userId: preCreated.id },
+          data: { invitationStatus: 'ACCEPTED' },
+        });
         this.logger.log(`Linked Clerk ${clerkId} to pre-created user ${email}`);
         return user;
       }
 
-      const user = await this.prisma.user.upsert({
-        where: { clerkId },
-        update: { email, name, avatarUrl: clerkUser.image_url },
-        create: {
-          clerkId,
-          email,
-          name,
-          avatarUrl: clerkUser.image_url,
-          phone: clerkUser.phone_numbers?.[0]?.phone_number,
-          role: UserRole.ADMIN,
-          isActive: true,
-        },
-      });
-
-      this.logger.log(`Auto-synced user ${email} (${clerkId}) from Clerk`);
-      return user;
+      try {
+        const user = await this.prisma.user.upsert({
+          where: { clerkId },
+          update: { email, name, avatarUrl: clerkUser.image_url, lastLoginAt: new Date() },
+          create: {
+            clerkId,
+            email,
+            name,
+            avatarUrl: clerkUser.image_url,
+            phone: clerkUser.phone_numbers?.[0]?.phone_number,
+            role: UserRole.ADMIN,
+            isActive: true,
+          },
+        });
+        this.logger.log(`Auto-synced user ${email} (${clerkId}) from Clerk`);
+        return user;
+      } catch (upsertErr: any) {
+        // P2002 = unique constraint — email exists with a different/null clerkId
+        // that the case-insensitive search above didn't catch (e.g. already has a clerkId).
+        // Find by email and update the clerkId to this one.
+        if (upsertErr.code === 'P2002') {
+          const existing = await this.prisma.user.findFirst({
+            where: { email: { equals: email, mode: 'insensitive' } },
+          });
+          if (existing) {
+            this.logger.warn(`Email conflict for ${email} — updating clerkId to ${clerkId}`);
+            return this.prisma.user.update({
+              where: { id: existing.id },
+              data: { clerkId, avatarUrl: clerkUser.image_url, lastLoginAt: new Date() },
+            });
+          }
+        }
+        throw upsertErr;
+      }
     } catch (err) {
       this.logger.error(`Failed to sync user ${clerkId} from Clerk: ${err.message}`);
       throw new UnauthorizedException('User not found. Please contact support.');

@@ -20,7 +20,9 @@ export class AuthService {
 
       // If admin pre-created this user by email (clerkId still null), link instead of duplicating
       const preCreated = email
-        ? await this.prisma.user.findFirst({ where: { email, clerkId: null } })
+        ? await this.prisma.user.findFirst({
+            where: { email: { equals: email, mode: 'insensitive' }, clerkId: null },
+          })
         : null;
 
       if (preCreated) {
