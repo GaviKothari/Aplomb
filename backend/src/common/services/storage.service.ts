@@ -10,16 +10,20 @@ export class StorageService {
   private readonly publicUrl: string;
   private readonly logger = new Logger(StorageService.name);
 
-  constructor(private readonly config: ConfigService) {
+  constructor(config: ConfigService) {
     this.bucket = config.get<string>('r2.bucketName') ?? 'aplomb-media';
     this.publicUrl = config.get<string>('r2.publicUrl') ?? '';
 
+    const endpoint = config.get<string>('r2.endpoint');
+    const accessKeyId = config.get<string>('r2.accessKeyId') ?? '';
+    this.logger.log(`R2 init — endpoint: ${endpoint}, bucket: ${this.bucket}, hasKey: ${!!accessKeyId}`);
+
     this.s3 = new S3Client({
       region: 'auto',
-      endpoint: config.get<string>('r2.endpoint'),
+      endpoint,
       forcePathStyle: true, // R2 requires path-style; virtual-hosted causes SSL mismatch
       credentials: {
-        accessKeyId: config.get<string>('r2.accessKeyId') ?? '',
+        accessKeyId,
         secretAccessKey: config.get<string>('r2.secretAccessKey') ?? '',
       },
     });
