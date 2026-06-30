@@ -2,12 +2,12 @@ import {
   IsString, IsOptional, IsEnum, IsNumber, IsDateString, IsArray,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { CasePriority, PropertyType } from '@prisma/client';
+import { CasePriority } from '@prisma/client';
 
 export class CreateCaseDto {
   @ApiProperty() @IsString() organizationId: string;
   @ApiProperty() @IsString() caseType: string;
-  @ApiProperty() @IsEnum(PropertyType) propertyType: PropertyType;
+  @ApiProperty() @IsString() propertyType: string;
   @ApiPropertyOptional() @IsOptional() @IsEnum(CasePriority) priority?: CasePriority;
 
   // Property

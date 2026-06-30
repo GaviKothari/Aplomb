@@ -41,7 +41,18 @@ const STEPS = [
 const BANKS = ['HDFC Bank', 'ICICI Bank', 'SBI', 'Axis Bank', 'Kotak Bank', 'Yes Bank']
 const CASE_TYPES = ['Residential', 'Commercial', 'Land', 'Mixed']
 const PRIORITIES = ['Low', 'Medium', 'High', 'Critical']
-const PROPERTY_TYPES = ['Flat', 'House', 'Plot', 'Shop', 'Office', 'Warehouse']
+const PROPERTY_TYPES = [
+  'APF PROJECT', 'Affordable Flat', 'Authority Flat', 'Builder Flat', 'Builder Floor',
+  'Bungalow', 'Commercial Building', 'Commercial Floor', 'Commercial Property',
+  'Commercial Shop', 'Commercial Space', 'DDA Flat', 'DDA LIG Flat', 'DDA MIG Flat',
+  'DDA SFS Flat', 'Developer Flat', 'Developer Floor', 'Developer Villa', 'Duplex Flat',
+  'Duplex House', 'EWS Flat', 'Flat', 'GDA Flat', 'Hospital', 'Hotel',
+  'Independent Commercial Property', 'Independent House', 'Individual Floor',
+  'Individual House', 'Industrial Building', 'Janta Flat', 'LIG Flat', 'MIG Flat',
+  'Mixed Use', 'Office Space', 'Pent House', 'Proposed Building', 'Resort', 'Row House',
+  'SCO Plot', 'School Property', 'Service Apartment', 'Shop', 'Society Flat',
+  'Society Floor', 'Under Construction', 'Vacant Land', 'Vacant Plot', 'Villa', 'Warehouse',
+]
 const ENGINEERS = ['Raj Kumar', 'Priya Singh', 'Amit Patel', 'Neha Sharma', 'Rohan Singh']
 const VERIFIERS = ['Mohit Sharma', 'Deepak Kumar', 'Anjali Verma', 'Vikram Singh']
 

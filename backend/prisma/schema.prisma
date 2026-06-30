@@ -316,7 +316,7 @@ model Case {
   organizationId   String
   organization     Organization @relation(fields: [organizationId], references: [id])
   caseType         String
-  propertyType     PropertyType
+  propertyType     String
   priority         CasePriority @default(MEDIUM)
   status           CaseStatus   @default(NEW)
 
@@ -513,7 +513,7 @@ model Report {
 
   // Property Information
   propertyDescription String?
-  propertyType        PropertyType?
+  propertyType        String?
   constructionStage   ConstructionStage?
   totalFloors         Int?
   occupiedFloors      Int?
