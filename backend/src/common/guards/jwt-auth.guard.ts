@@ -70,6 +70,19 @@ export class JwtAuthGuard implements CanActivate {
         throw new UnauthorizedException('Account is deactivated');
       }
 
+      // If the JWT has no role claim, the user was linked before this fix.
+      // Push the DB role to Clerk now so the next JWT carries it.
+      const jwtRole = (payload?.metadata as any)?.role;
+      if (!jwtRole && user.clerkId) {
+        const secretKey = this.configService.get<string>('clerk.secretKey');
+        axios.patch(
+          `https://api.clerk.com/v1/users/${user.clerkId}/metadata`,
+          { public_metadata: { role: user.role } },
+          { headers: { Authorization: `Bearer ${secretKey}` } },
+        ).then(() => this.logger.log(`Backfilled role ${user.role} to Clerk for ${user.clerkId}`))
+         .catch(e => this.logger.error(`Role backfill failed for ${user.clerkId}: ${e.message}`));
+      }
+
       request.user = user;
       return true;
     } catch (err) {
