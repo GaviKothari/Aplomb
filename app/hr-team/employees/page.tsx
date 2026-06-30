@@ -15,9 +15,9 @@ import {
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmployeeFormDialog } from '@/components/employees/employee-form-dialog'
-import { useEmployees } from '@/lib/api/hooks'
+import { useEmployees, useResendWelcome } from '@/lib/api/hooks'
 import {
-  Plus, Search, Mail, Phone, Eye, Users, UserCheck, UserX, Building2,
+  Plus, Search, Mail, Phone, Eye, Users, UserCheck, UserX, Building2, Send,
 } from 'lucide-react'
 
 const DEPARTMENTS = [
@@ -56,6 +56,7 @@ export default function EmployeesPage() {
   const [search, setSearch] = useState('')
   const [dept, setDept] = useState('all')
   const [addOpen, setAddOpen] = useState(false)
+  const resendWelcome = useResendWelcome()
 
   const { data, isLoading } = useEmployees({
     search: search || undefined,
@@ -244,11 +245,23 @@ export default function EmployeesPage() {
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" asChild>
-                            <Link href={`/hr-team/employees/${emp.id}`}>
-                              <Eye className="w-3 h-3" />View
-                            </Link>
-                          </Button>
+                          <div className="flex items-center gap-1">
+                            <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" asChild>
+                              <Link href={`/hr-team/employees/${emp.id}`}>
+                                <Eye className="w-3 h-3" />View
+                              </Link>
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 gap-1 text-xs text-muted-foreground hover:text-blue-600"
+                              disabled={resendWelcome.isPending}
+                              onClick={() => resendWelcome.mutate(emp.id)}
+                              title="Resend welcome email & SMS"
+                            >
+                              <Send className="w-3 h-3" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     )

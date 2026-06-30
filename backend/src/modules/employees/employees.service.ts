@@ -11,10 +11,6 @@ const DOC_FIELD_MAP: Record<string, string> = {
   photo:         'photoS3Key',
 };
 
-const DEPT_OPTIONS = [
-  'Field Survey', 'Operations', 'Quality & Verification',
-  'Finance & Accounts', 'Human Resources', 'Management', 'IT',
-];
 
 @Injectable()
 export class EmployeesService {
@@ -88,6 +84,18 @@ export class EmployeesService {
     this.sendWelcome(employee).catch(() => null);
 
     return employee;
+  }
+
+  async resendWelcome(employeeId: string) {
+    const employee = await this.prisma.employee.findUnique({
+      where: { id: employeeId },
+      include: {
+        user: { select: { id: true, name: true, email: true, phone: true } },
+      },
+    });
+    if (!employee) throw new NotFoundException('Employee not found');
+    await this.sendWelcome(employee);
+    return { sent: true, to: employee.user.email };
   }
 
   private async sendWelcome(employee: any) {

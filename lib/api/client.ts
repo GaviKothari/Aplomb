@@ -166,6 +166,7 @@ export function createApiClient(getToken: () => Promise<string | null>) {
       update: (id: string, body: any) => api<any>(`/employees/${id}`, { method: 'PATCH', body }),
       deactivate: (id: string) => api<any>(`/employees/${id}/deactivate`, { method: 'POST' }),
       activate: (id: string) => api<any>(`/employees/${id}/activate`, { method: 'POST' }),
+      resendWelcome: (id: string) => api<any>(`/employees/${id}/resend-welcome`, { method: 'POST' }),
       getCaseCount: (id: string) => api<any>(`/employees/${id}/cases`),
       getAttendance: (id: string, month?: number, year?: number) =>
         api<any>(`/employees/${id}/attendance`, { params: { month, year } }),

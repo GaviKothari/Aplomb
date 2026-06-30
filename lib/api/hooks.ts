@@ -390,6 +390,15 @@ export function useCreateEmployee() {
   });
 }
 
+export function useResendWelcome() {
+  const api = useApi();
+  return useMutation({
+    mutationFn: (id: string) => api.employees.resendWelcome(id),
+    onSuccess: (data: any) => toast.success(`Welcome message sent to ${data.to}`),
+    onError: (e: any) => toast.error(e.message ?? 'Failed to send'),
+  });
+}
+
 export function useUpdateEmployee() {
   const api = useApi();
   const qc = useQueryClient();

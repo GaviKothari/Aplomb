@@ -57,6 +57,13 @@ export class EmployeesController {
     return this.service.activate(id);
   }
 
+  @Post(':id/resend-welcome')
+  @Roles(UserRole.ADMIN, UserRole.HR)
+  @ApiOperation({ summary: 'Resend welcome email + SMS to an employee' })
+  resendWelcome(@Param('id') id: string) {
+    return this.service.resendWelcome(id);
+  }
+
   @Get(':id/cases')
   @Roles(UserRole.ADMIN, UserRole.HR)
   getCaseCount(@Param('id') id: string) {
