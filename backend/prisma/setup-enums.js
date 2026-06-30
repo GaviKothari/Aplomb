@@ -22,6 +22,39 @@ async function main() {
     await exec(`ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS '${v}'`, `role ${v}`);
   }
 
+  // All property type display strings the UI can send.
+  // Belt-and-suspenders: even if ALTER TABLE TYPE TEXT below fails (e.g. no DIRECT_URL),
+  // these values are valid PropertyType enum members and PostgreSQL will accept them.
+  // ALTER TYPE ADD VALUE runs outside transactions — works fine through PgBouncer.
+  const propertyTypeValues = [
+    'APF PROJECT', 'Affordable Flat', 'Authority Flat', 'Builder Flat', 'Builder Floor',
+    'Bungalow', 'Commercial Building', 'Commercial Floor', 'Commercial Office',
+    'Commercial Property', 'Commercial Shop', 'Commercial Space', 'DDA Flat',
+    'DDA LIG Flat', 'DDA MIG Flat', 'DDA SFS Flat', 'Developer Flat', 'Developer Floor',
+    'Developer Villa', 'Duplex Flat', 'Duplex House', 'EWS Flat', 'Flat',
+    'Flat/Apartment', 'GDA Flat', 'Hospital', 'Hotel', 'Independent Commercial Property',
+    'Independent House', 'Individual Floor', 'Individual House', 'Industrial Building',
+    'Janta Flat', 'LIG Flat', 'MIG Flat', 'Mixed Use', 'Office Space', 'Pent House',
+    'Plot/Land', 'Proposed Building', 'Resort', 'Row House', 'SCO Plot', 'School Property',
+    'Service Apartment', 'Shop', 'Society Flat', 'Society Floor', 'Under Construction',
+    'Vacant Land', 'Vacant Plot', 'Villa', 'Warehouse',
+  ];
+  for (const v of propertyTypeValues) {
+    await exec(
+      `ALTER TYPE "PropertyType" ADD VALUE IF NOT EXISTS '${v.replace(/'/g, "''")}'`,
+      `PropertyType '${v}'`,
+    );
+  }
+
+  // Construction stage display strings the engineer form sends.
+  const constructionStageValues = ['Under Construction', 'Ready to Move', 'Old Construction', 'Completed (New)'];
+  for (const v of constructionStageValues) {
+    await exec(
+      `ALTER TYPE "ConstructionStage" ADD VALUE IF NOT EXISTS '${v.replace(/'/g, "''")}'`,
+      `ConstructionStage '${v}'`,
+    );
+  }
+
   // Change constructionStage from enum to TEXT on valuation_reports
   await exec(
     `ALTER TABLE "valuation_reports" ALTER COLUMN "constructionStage" TYPE TEXT USING "constructionStage"::TEXT`,
