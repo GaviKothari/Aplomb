@@ -45,7 +45,8 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 COPY package.json ./
+COPY start.sh ./
 
 EXPOSE 3001
 
-CMD ["sh", "-c", "node_modules/.bin/prisma migrate resolve --rolled-back 20260627000000_property_intelligence 2>/dev/null || true; node prisma/setup-enums.js; node_modules/.bin/prisma migrate resolve --applied 20260630000000_employee_clerk_integration 2>/dev/null || true; node_modules/.bin/prisma migrate deploy || true; node dist/main"]
+CMD ["sh", "start.sh"]
