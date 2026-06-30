@@ -15,7 +15,6 @@ import {
   ChevronDown, ChevronUp, Loader2,
 } from 'lucide-react'
 import Link from 'next/link'
-import { toast } from 'sonner'
 
 const STATUS_COLOR: Record<string, string> = {
   NEW: 'bg-slate-100 text-slate-700',
@@ -135,6 +134,39 @@ export default function EngineerCaseDetailPage() {
 
   const c = data?.data ?? data
 
+  // Pre-fill form when case data loads (if field data already submitted)
+  const [formInit, setFormInit] = useState(false)
+  if (c && !formInit) {
+    const fd = c.fieldData ?? {}
+    if (Object.keys(fd).length > 0) {
+      setForm(f => ({
+        ...f,
+        propertyType:         fd.propertyType        ?? f.propertyType,
+        constructionStage:    fd.constructionStage    ?? f.constructionStage,
+        totalFloors:          fd.totalFloors          != null ? String(fd.totalFloors)          : f.totalFloors,
+        occupiedFloors:       fd.occupiedFloors       != null ? String(fd.occupiedFloors)       : f.occupiedFloors,
+        facingDirection:      fd.facingDirection      ?? f.facingDirection,
+        ageOfConstruction:    fd.ageOfConstruction    != null ? String(fd.ageOfConstruction)    : f.ageOfConstruction,
+        carpetArea:           fd.carpetArea           != null ? String(fd.carpetArea)           : f.carpetArea,
+        builtUpArea:          fd.builtUpArea          != null ? String(fd.builtUpArea)          : f.builtUpArea,
+        plotArea:             fd.plotArea             != null ? String(fd.plotArea)             : f.plotArea,
+        roadWidth:            fd.roadWidth            != null ? String(fd.roadWidth)            : f.roadWidth,
+        landRatePerSqFt:      fd.landRatePerSqFt      != null ? String(fd.landRatePerSqFt)      : f.landRatePerSqFt,
+        buildingRatePerSqFt:  fd.buildingRatePerSqFt  != null ? String(fd.buildingRatePerSqFt)  : f.buildingRatePerSqFt,
+        totalMarketValue:     fd.totalMarketValue     != null ? String(fd.totalMarketValue)     : f.totalMarketValue,
+        distressValue:        fd.distressValue        != null ? String(fd.distressValue)        : f.distressValue,
+        siteObservations:     fd.siteObservations     ?? f.siteObservations,
+        boundaryDescription:  fd.boundaryDescription  ?? f.boundaryDescription,
+        nearbyLandmarks:      fd.nearbyLandmarks      ?? f.nearbyLandmarks,
+        localityFeatures:     Array.isArray(fd.localityFeatures) ? fd.localityFeatures.join(', ') : (fd.localityFeatures ?? f.localityFeatures),
+        amenities:            Array.isArray(fd.amenities)        ? fd.amenities                   : f.amenities,
+        marketabilityRating:  fd.marketabilityRating  ?? f.marketabilityRating,
+        liquidityRating:      fd.liquidityRating      ?? f.liquidityRating,
+      }))
+    }
+    setFormInit(true)
+  }
+
   const getGPS = (): Promise<GeolocationCoordinates> => new Promise((resolve, reject) => {
     if (!navigator.geolocation) { reject(new Error('Geolocation not supported')); return }
     setGettingGps(true)
@@ -148,7 +180,10 @@ export default function EngineerCaseDetailPage() {
   const handleStartVisit = async () => {
     try {
       const coords = await getGPS()
-      updateStatus.mutate({ id, status: 'SITE_VISIT_IN_PROGRESS' })
+      updateStatus.mutate({
+        id, status: 'SITE_VISIT_IN_PROGRESS',
+        lat: coords.latitude, lng: coords.longitude,
+      } as any)
     } catch {
       setGpsError('Enable GPS to start site visit')
     }
@@ -156,8 +191,11 @@ export default function EngineerCaseDetailPage() {
 
   const handleEndVisit = async () => {
     try {
-      await getGPS()
-      updateStatus.mutate({ id, status: 'SITE_VISIT_COMPLETED' })
+      const coords = await getGPS()
+      updateStatus.mutate({
+        id, status: 'SITE_VISIT_COMPLETED',
+        lat: coords.latitude, lng: coords.longitude,
+      } as any)
     } catch {
       setGpsError('Enable GPS to complete site visit')
     }

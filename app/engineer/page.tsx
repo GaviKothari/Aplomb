@@ -1,7 +1,7 @@
 'use client'
 
 import { useUser } from '@clerk/nextjs'
-import { useCases, useTodayAttendance } from '@/lib/api/hooks'
+import { useCases, useTodayAttendance, useMe } from '@/lib/api/hooks'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import Link from 'next/link'
@@ -25,16 +25,23 @@ function fmt(t: string) {
   return new Date(t).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
 }
 
+function isToday(dateStr: string) {
+  const d = new Date(dateStr)
+  const now = new Date()
+  return d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+}
+
 export default function EngineerHomePage() {
   const { user } = useUser()
+  const { data: me } = useMe()
   const { data: attendance, isLoading: loadingAtt } = useTodayAttendance()
-  const { data: casesData, isLoading: loadingCases } = useCases({ limit: 20 })
+  const { data: casesData, isLoading: loadingCases } = useCases({ limit: 50, engineerId: me?.id })
 
   const cases: any[] = casesData?.data ?? []
-  const active = cases.filter((c: any) =>
-    ['ASSIGNED', 'SITE_VISIT_SCHEDULED', 'SITE_VISIT_IN_PROGRESS'].includes((c.status ?? '').toUpperCase()))
-  const done = cases.filter((c: any) => (c.status ?? '').toUpperCase() === 'SITE_VISIT_COMPLETED')
+  const active   = cases.filter((c: any) => ['ASSIGNED', 'SITE_VISIT_SCHEDULED', 'SITE_VISIT_IN_PROGRESS'].includes((c.status ?? '').toUpperCase()))
+  const done     = cases.filter((c: any) => (c.status ?? '').toUpperCase() === 'SITE_VISIT_COMPLETED')
   const revision = cases.filter((c: any) => (c.status ?? '').toUpperCase() === 'REVISION_REQUESTED')
+  const todayVisits = active.filter((c: any) => c.siteVisitDate && isToday(c.siteVisitDate))
 
   const isPunchedIn = attendance?.punchIn && !attendance?.punchOut
   const hour = new Date().getHours()
@@ -89,7 +96,37 @@ export default function EngineerHomePage() {
         </div>
       </div>
 
-      {/* Today's cases */}
+      {/* Today's visits callout */}
+      {todayVisits.length > 0 && (
+        <div className="px-5 mt-6">
+          <h2 className="font-semibold text-base mb-2 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse inline-block" />
+            Today's Visits
+          </h2>
+          <div className="space-y-2">
+            {todayVisits.map((c: any) => {
+              const status = (c.status ?? '').toUpperCase()
+              return (
+                <Link key={c.id} href={`/engineer/cases/${c.id}`}>
+                  <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-2xl p-4 active:scale-[0.98] transition-transform">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold line-clamp-1">{c.ownerName ?? 'Unknown Owner'}</p>
+                        <p className="text-xs text-muted-foreground line-clamp-1 mt-0.5">{c.propertyAddress}</p>
+                      </div>
+                      <Badge className={`text-[10px] shrink-0 ${STATUS_COLOR[status] ?? 'bg-slate-100 text-slate-700'}`}>
+                        {STATUS_LABEL[status] ?? status}
+                      </Badge>
+                    </div>
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* All active cases */}
       <div className="px-5 mt-6">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-semibold text-base">My Cases</h2>

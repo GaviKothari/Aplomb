@@ -14,6 +14,16 @@ export function useApi() {
   return createApiClient(() => getToken());
 }
 
+// ── Current user (DB profile) ─────────────────────────────────
+export function useMe() {
+  const api = useApi();
+  return useQuery({
+    queryKey: ['me'],
+    queryFn: () => api.auth.me(),
+    staleTime: 5 * 60_000,
+  });
+}
+
 // ── Cases ─────────────────────────────────────────────────────
 export function useCases(filters?: {
   page?: number; limit?: number; search?: string; status?: string;
