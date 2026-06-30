@@ -29,12 +29,16 @@ const DEPARTMENTS = [
   'Finance & Accounts', 'Human Resources', 'Management', 'IT',
 ]
 const ROLES = [
-  { value: 'ENGINEER',    label: 'Field Engineer' },
-  { value: 'COORDINATOR', label: 'Coordinator' },
-  { value: 'VERIFIER',    label: 'Verifier' },
-  { value: 'ACCOUNTS',    label: 'Accounts' },
-  { value: 'HR',          label: 'HR' },
-  { value: 'ADMIN',       label: 'Admin' },
+  { value: 'ENGINEER',      label: 'Site Engineer' },
+  { value: 'COORDINATOR',   label: 'Coordinator' },
+  { value: 'VERIFIER',      label: 'Verifier' },
+  { value: 'REPORT_MAKER',  label: 'Report Maker' },
+  { value: 'FINALIZER',     label: 'Finalizer' },
+  { value: 'ACCOUNTS',      label: 'Accounts' },
+  { value: 'HR',            label: 'HR' },
+  { value: 'MIS_EXECUTIVE', label: 'MIS Executive' },
+  { value: 'VIEWER',        label: 'Viewer' },
+  { value: 'ADMIN',         label: 'Admin' },
 ]
 const EMP_TYPES = [
   { value: 'FULL_TIME',  label: 'Full Time' },

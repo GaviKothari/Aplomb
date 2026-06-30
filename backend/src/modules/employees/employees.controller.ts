@@ -12,7 +12,7 @@ import { UserRole, User } from '@prisma/client';
 
 const upload = FileInterceptor('file', {
   storage: memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  limits: { fileSize: 10 * 1024 * 1024 },
 });
 
 @ApiTags('Employees')
@@ -45,24 +45,46 @@ export class EmployeesController {
     return this.service.update(id, dto);
   }
 
-  @Post(':id/deactivate')
+  // ── Invitation ──────────────────────────────────────────────────────────────
+
+  @Post(':id/resend-invite')
   @Roles(UserRole.ADMIN, UserRole.HR)
-  deactivate(@Param('id') id: string) {
-    return this.service.deactivate(id);
+  @ApiOperation({ summary: 'Resend Clerk invitation email to employee' })
+  resendInvitation(@Param('id') id: string) {
+    return this.service.resendInvitation(id);
+  }
+
+  /** @deprecated Use resend-invite — kept for backward compat */
+  @Post(':id/resend-welcome')
+  @Roles(UserRole.ADMIN, UserRole.HR)
+  resendWelcome(@Param('id') id: string) {
+    return this.service.resendInvitation(id);
+  }
+
+  // ── Status ──────────────────────────────────────────────────────────────────
+
+  @Post(':id/suspend')
+  @Roles(UserRole.ADMIN, UserRole.HR)
+  @ApiOperation({ summary: 'Suspend employee — disables Clerk account immediately' })
+  suspend(@Param('id') id: string) {
+    return this.service.suspend(id);
   }
 
   @Post(':id/activate')
   @Roles(UserRole.ADMIN, UserRole.HR)
+  @ApiOperation({ summary: 'Re-activate a suspended employee' })
   activate(@Param('id') id: string) {
     return this.service.activate(id);
   }
 
-  @Post(':id/resend-welcome')
+  /** @deprecated Use suspend */
+  @Post(':id/deactivate')
   @Roles(UserRole.ADMIN, UserRole.HR)
-  @ApiOperation({ summary: 'Resend welcome email + SMS to an employee' })
-  resendWelcome(@Param('id') id: string) {
-    return this.service.resendWelcome(id);
+  deactivate(@Param('id') id: string) {
+    return this.service.suspend(id);
   }
+
+  // ── Queries ─────────────────────────────────────────────────────────────────
 
   @Get(':id/cases')
   @Roles(UserRole.ADMIN, UserRole.HR)
@@ -81,20 +103,20 @@ export class EmployeesController {
     return this.service.getAttendanceSummary(
       id,
       +month || new Date().getMonth() + 1,
-      +year || new Date().getFullYear(),
+      +year  || new Date().getFullYear(),
     );
   }
 
+  // ── Documents ───────────────────────────────────────────────────────────────
+
   @Get(':id/documents')
   @Roles(UserRole.ADMIN, UserRole.HR)
-  @ApiOperation({ summary: 'Get signed URLs for all employee documents' })
   getDocuments(@Param('id') id: string) {
     return this.service.getDocumentUrls(id);
   }
 
   @Post(':id/documents')
   @Roles(UserRole.ADMIN, UserRole.HR)
-  @ApiOperation({ summary: 'Upload an employee document (aadhaar/pan/drivingLicense/agreement/photo)' })
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(upload)
   uploadDocument(
@@ -107,7 +129,6 @@ export class EmployeesController {
 
   @Delete(':id/documents/:type')
   @Roles(UserRole.ADMIN, UserRole.HR)
-  @ApiOperation({ summary: 'Delete an employee document' })
   deleteDocument(@Param('id') id: string, @Param('type') type: string) {
     return this.service.deleteDocument(id, type);
   }

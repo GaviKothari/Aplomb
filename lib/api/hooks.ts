@@ -390,13 +390,22 @@ export function useCreateEmployee() {
   });
 }
 
-export function useResendWelcome() {
+export function useResendInvite() {
   const api = useApi();
+  const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.employees.resendWelcome(id),
-    onSuccess: (data: any) => toast.success(`Welcome message sent to ${data.to}`),
-    onError: (e: any) => toast.error(e.message ?? 'Failed to send'),
+    mutationFn: (id: string) => api.employees.resendInvite(id),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ['employees'] });
+      if (data.sent) toast.success(`Invitation resent to ${data.to}`);
+      else toast.info(data.reason ?? 'No invite needed — employee already has an account');
+    },
+    onError: (e: any) => toast.error(e.message ?? 'Failed to resend invite'),
   });
+}
+
+export function useResendWelcome() {
+  return useResendInvite();
 }
 
 export function useUpdateEmployee() {
@@ -457,19 +466,40 @@ export function useDeleteEmployeeDocument() {
   })
 }
 
-export function useToggleEmployeeStatus() {
+export function useSuspendEmployee() {
   const api = useApi();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, active }: { id: string; active: boolean }) =>
-      active ? api.employees.activate(id) : api.employees.deactivate(id),
+    mutationFn: (id: string) => api.employees.suspend(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['employees'] });
-      qc.invalidateQueries({ queryKey: ['employee'] });
-      toast.success('Status updated');
+      toast.success('Employee suspended — login disabled immediately');
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(e.message ?? 'Failed to suspend'),
   });
+}
+
+export function useActivateEmployee() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.employees.activate(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['employees'] });
+      toast.success('Employee re-activated');
+    },
+    onError: (e: any) => toast.error(e.message ?? 'Failed to activate'),
+  });
+}
+
+export function useToggleEmployeeStatus() {
+  const suspend  = useSuspendEmployee();
+  const activate = useActivateEmployee();
+  return {
+    mutate: ({ id, active }: { id: string; active: boolean }) =>
+      active ? activate.mutate(id) : suspend.mutate(id),
+    isPending: suspend.isPending || activate.isPending,
+  };
 }
 
 // ── Attendance ────────────────────────────────────────────────

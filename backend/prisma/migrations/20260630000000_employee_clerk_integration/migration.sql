@@ -1,0 +1,10 @@
+-- Add new UserRole enum values
+ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS 'REPORT_MAKER';
+ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS 'FINALIZER';
+ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS 'MIS_EXECUTIVE';
+ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS 'VIEWER';
+
+-- Add invitation tracking and employment status to employees
+ALTER TABLE "employees" ADD COLUMN IF NOT EXISTS "employeeStatus" TEXT NOT NULL DEFAULT 'ACTIVE';
+ALTER TABLE "employees" ADD COLUMN IF NOT EXISTS "invitationStatus" TEXT NOT NULL DEFAULT 'PENDING';
+ALTER TABLE "employees" ADD COLUMN IF NOT EXISTS "invitationSentAt" TIMESTAMP(3);

@@ -21,9 +21,13 @@ enum UserRole {
   ADMIN
   COORDINATOR
   ENGINEER
+  REPORT_MAKER
   VERIFIER
+  FINALIZER
   HR
   ACCOUNTS
+  MIS_EXECUTIVE
+  VIEWER
 }
 
 enum CaseStatus {
@@ -737,6 +741,11 @@ model Employee {
   otherAllowances Decimal?  @db.Decimal(10, 2)
   pfEnabled       Boolean   @default(false)
   esiEnabled      Boolean   @default(false)
+
+  // Employment & invitation status
+  employeeStatus   String    @default("ACTIVE")   // ACTIVE | ON_LEAVE | SUSPENDED | RESIGNED
+  invitationStatus String    @default("PENDING")   // PENDING | SENT | ACCEPTED | FAILED
+  invitationSentAt DateTime?
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

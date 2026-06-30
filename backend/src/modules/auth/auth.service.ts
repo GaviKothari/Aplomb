@@ -28,7 +28,12 @@ export class AuthService {
           where: { id: preCreated.id },
           data: { clerkId: data.id, name, avatarUrl: data.image_url, role },
         });
-        this.logger.log(`Linked Clerk ${data.id} to pre-created user ${email}`);
+        // Mark invitation accepted on the employee record
+        await this.prisma.employee.updateMany({
+          where: { userId: preCreated.id },
+          data:  { invitationStatus: 'ACCEPTED' },
+        });
+        this.logger.log(`Linked Clerk ${data.id} to pre-created user ${email} — invitation accepted`);
       } else {
         await this.prisma.user.upsert({
           where: { clerkId: data.id },

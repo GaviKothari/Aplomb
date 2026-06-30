@@ -13,6 +13,25 @@ const DOC_FIELD_MAP: Record<string, string> = {
   photo:         'photoS3Key',
 };
 
+// ── Clerk API helper ────────────────────────────────────────────────────────────
+
+async function clerkRequest<T = any>(
+  secretKey: string,
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  path: string,
+  data?: any,
+): Promise<T> {
+  const res = await axios.request<T>({
+    method,
+    url: `https://api.clerk.com/v1${path}`,
+    headers: {
+      Authorization: `Bearer ${secretKey}`,
+      'Content-Type': 'application/json',
+    },
+    data,
+  });
+  return res.data;
+}
 
 @Injectable()
 export class EmployeesService {
@@ -25,15 +44,87 @@ export class EmployeesService {
     private readonly config: ConfigService,
   ) {}
 
+  // ── Clerk helpers ───────────────────────────────────────────────────────────
+
+  private get clerkSecret(): string {
+    return this.config.get<string>('clerk.secretKey') ?? '';
+  }
+
+  /** Send a Clerk invitation email. Clerk sends the email itself — no Resend needed. */
+  private async sendClerkInvitation(
+    email: string,
+    role: string,
+  ): Promise<{ success: boolean; invitationId?: string; error?: string }> {
+    if (!this.clerkSecret) {
+      this.logger.warn('CLERK_SECRET_KEY not set — skipping invitation');
+      return { success: false, error: 'CLERK_SECRET_KEY not configured' };
+    }
+    try {
+      const res = await clerkRequest<{ id: string }>(
+        this.clerkSecret,
+        'POST',
+        '/invitations',
+        { email_address: email, public_metadata: { role } },
+      );
+      this.logger.log(`Clerk invitation created for ${email} (id=${res.id})`);
+      return { success: true, invitationId: res.id };
+    } catch (e: any) {
+      const errBody = e.response?.data;
+      const msg: string =
+        errBody?.errors?.[0]?.long_message ??
+        errBody?.errors?.[0]?.message ??
+        e.message;
+
+      // Clerk returns 422 "already invited" — treat as success (invitation still pending)
+      if (e.response?.status === 422 && msg.toLowerCase().includes('already')) {
+        this.logger.log(`Clerk invitation already exists for ${email}`);
+        return { success: true };
+      }
+
+      this.logger.error(
+        `Clerk invitation failed for ${email}: ${JSON.stringify(errBody ?? msg)}`,
+      );
+      return { success: false, error: msg };
+    }
+  }
+
+  /** Update Clerk public_metadata when role changes. */
+  private async syncRoleToClerk(clerkId: string, role: string): Promise<void> {
+    if (!this.clerkSecret) return;
+    try {
+      await clerkRequest(this.clerkSecret, 'PATCH', `/users/${clerkId}/metadata`, {
+        public_metadata: { role },
+      });
+      this.logger.log(`Clerk metadata synced for ${clerkId}: role=${role}`);
+    } catch (e: any) {
+      this.logger.error(`Failed to sync Clerk metadata for ${clerkId}: ${e.message}`);
+    }
+  }
+
+  /** Ban a Clerk user — prevents login immediately. */
+  private async banClerkUser(clerkId: string): Promise<void> {
+    await clerkRequest(this.clerkSecret, 'POST', `/users/${clerkId}/ban`);
+    this.logger.log(`Clerk user banned: ${clerkId}`);
+  }
+
+  /** Re-enable a banned Clerk user. */
+  private async unbanClerkUser(clerkId: string): Promise<void> {
+    await clerkRequest(this.clerkSecret, 'POST', `/users/${clerkId}/unban`);
+    this.logger.log(`Clerk user unbanned: ${clerkId}`);
+  }
+
+  // ── Employee creation ───────────────────────────────────────────────────────
+
   async create(dto: any, _createdById: string) {
     const code = await this.generateEmployeeCode();
 
-    // Resolve or create the linked user
     let userId = dto.userId as string | undefined;
+    let userEmail = dto.email as string;
+    let userRole  = dto.role ?? 'ENGINEER';
 
     if (!userId) {
       if (!dto.email || !dto.name) {
-        throw new BadRequestException('email and name are required when userId is not provided');
+        throw new BadRequestException('email and name are required');
       }
 
       let user = await this.prisma.user.findUnique({ where: { email: dto.email } });
@@ -45,131 +136,177 @@ export class EmployeesService {
         user = await this.prisma.user.update({
           where: { id: user.id },
           data: {
-            role: dto.role ?? user.role,
-            name: dto.name ?? user.name,
+            role:  dto.role  ?? user.role,
+            name:  dto.name  ?? user.name,
             phone: dto.phone ?? user.phone ?? null,
           },
         });
       } else {
         user = await this.prisma.user.create({
           data: {
-            email: dto.email,
-            name: dto.name,
-            role: dto.role ?? 'ENGINEER',
-            phone: dto.phone ?? null,
+            email:    dto.email,
+            name:     dto.name,
+            role:     dto.role ?? 'ENGINEER',
+            phone:    dto.phone ?? null,
             isActive: true,
           },
         });
       }
 
-      userId = user.id;
+      userId    = user.id;
+      userEmail = user.email;
+      userRole  = (user as any).role;
     }
+
+    // Send Clerk invitation — Clerk emails the employee directly
+    const inviteResult = await this.sendClerkInvitation(userEmail, userRole);
 
     const employee = await this.prisma.employee.create({
       data: {
-        employeeCode: code,
-        department: dto.department,
-        designation: dto.designation,
-        reportingTo: dto.reportingTo ?? null,
-        joinDate: new Date(dto.joinDate),
-        employmentType: dto.employmentType ?? 'FULL_TIME',
-        basicSalary: dto.basicSalary ? parseFloat(String(dto.basicSalary)) : null,
-        hra: dto.hra ? parseFloat(String(dto.hra)) : null,
+        employeeCode:    code,
+        department:      dto.department,
+        designation:     dto.designation,
+        reportingTo:     dto.reportingTo ?? null,
+        joinDate:        new Date(dto.joinDate),
+        employmentType:  dto.employmentType ?? 'FULL_TIME',
+        basicSalary:     dto.basicSalary ? parseFloat(String(dto.basicSalary)) : null,
+        hra:             dto.hra         ? parseFloat(String(dto.hra))         : null,
         otherAllowances: dto.otherAllowances ? parseFloat(String(dto.otherAllowances)) : null,
-        pfEnabled: dto.pfEnabled ?? false,
-        esiEnabled: dto.esiEnabled ?? false,
+        pfEnabled:       dto.pfEnabled  ?? false,
+        esiEnabled:      dto.esiEnabled ?? false,
+        invitationStatus: inviteResult.success ? 'SENT' : 'FAILED',
+        invitationSentAt: inviteResult.success ? new Date() : null,
         user: { connect: { id: userId } },
       },
       include: {
-        user: { select: { id: true, name: true, email: true, role: true, phone: true, avatarUrl: true } },
+        user: {
+          select: {
+            id: true, name: true, email: true, role: true,
+            phone: true, avatarUrl: true, clerkId: true,
+          },
+        },
       },
     });
 
-    // Send Clerk invite (await so caller knows if it succeeded)
-    const userRole = (employee as any).user?.role ?? dto.role ?? 'ENGINEER';
-    const inviteResult = await this.sendClerkInvitation((employee as any).user.email, userRole);
+    // Fire-and-forget in-app / SMS welcome
     this.sendWelcome(employee).catch(() => null);
 
-    return { ...employee, clerkInviteSent: inviteResult.success, clerkInviteError: inviteResult.error };
+    return {
+      ...employee,
+      clerkInviteSent:  inviteResult.success,
+      clerkInviteError: inviteResult.error,
+    };
+  }
+
+  // ── Invitation management ───────────────────────────────────────────────────
+
+  async resendInvitation(employeeId: string) {
+    const emp = await this.prisma.employee.findUnique({
+      where: { id: employeeId },
+      include: {
+        user: { select: { id: true, email: true, role: true, clerkId: true, name: true } },
+      },
+    });
+    if (!emp) throw new NotFoundException('Employee not found');
+
+    const user = emp.user as any;
+
+    // If already has a Clerk account, they don't need an invitation
+    if (user.clerkId) {
+      return {
+        sent:   false,
+        reason: 'Employee already has a Clerk account. They can reset their password at app.aplomb.in.',
+      };
+    }
+
+    const inviteResult = await this.sendClerkInvitation(user.email, user.role);
+
+    await this.prisma.employee.update({
+      where: { id: employeeId },
+      data: {
+        invitationStatus: inviteResult.success ? 'SENT' : 'FAILED',
+        invitationSentAt: inviteResult.success ? new Date() : undefined,
+      },
+    });
+
+    return { sent: inviteResult.success, to: user.email, error: inviteResult.error };
   }
 
   async resendWelcome(employeeId: string) {
-    const employee = await this.prisma.employee.findUnique({
-      where: { id: employeeId },
-      include: {
-        user: { select: { id: true, name: true, email: true, phone: true, role: true, clerkId: true } },
-      },
-    });
-    if (!employee) throw new NotFoundException('Employee not found');
-
-    let clerkInviteSent = false;
-    if (!(employee as any).user.clerkId) {
-      const result = await this.sendClerkInvitation((employee as any).user.email, (employee as any).user.role);
-      clerkInviteSent = result.success;
-    }
-    await this.sendWelcome(employee);
-    return { sent: true, to: (employee as any).user.email, clerkInviteSent };
+    return this.resendInvitation(employeeId);
   }
 
-  private async sendClerkInvitation(email: string, role: string): Promise<{ success: boolean; error?: string }> {
-    const secretKey = this.config.get<string>('clerk.secretKey');
-    if (!secretKey) {
-      this.logger.warn('CLERK_SECRET_KEY not set — skipping Clerk invitation');
-      return { success: false, error: 'CLERK_SECRET_KEY not configured' };
-    }
-    try {
-      await axios.post(
-        'https://api.clerk.com/v1/invitations',
-        { email_address: email, public_metadata: { role } },
-        { headers: { Authorization: `Bearer ${secretKey}`, 'Content-Type': 'application/json' } },
-      );
-      this.logger.log(`Clerk invitation sent to ${email}`);
-      return { success: true };
-    } catch (e: any) {
-      const msg = e.response?.data?.errors?.[0]?.long_message ?? e.response?.data?.errors?.[0]?.message ?? e.message;
-      if (e.response?.status === 422 && msg?.toLowerCase().includes('already')) {
-        this.logger.log(`Clerk invitation already exists for ${email}`);
-        return { success: true };
+  // ── Suspend / unsuspend ─────────────────────────────────────────────────────
+
+  async suspend(id: string) {
+    const emp = await this.prisma.employee.findUnique({
+      where: { id },
+      select: { userId: true, user: { select: { clerkId: true } } },
+    });
+    if (!emp) throw new NotFoundException('Employee not found');
+
+    const clerkId = (emp.user as any)?.clerkId as string | null;
+
+    if (clerkId) {
+      try { await this.banClerkUser(clerkId); } catch (e: any) {
+        this.logger.error(`Clerk ban failed for ${clerkId}: ${e.message}`);
       }
-      this.logger.error(`Clerk invitation failed for ${email}: ${JSON.stringify(e.response?.data ?? msg)}`);
-      return { success: false, error: msg };
     }
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: emp.userId }, data: { isActive: false } }),
+      this.prisma.employee.update({ where: { id }, data: { employeeStatus: 'SUSPENDED' } }),
+    ]);
+
+    return { success: true, clerkBanned: !!clerkId };
   }
 
-  private async sendWelcome(employee: any) {
-    const { user, employeeCode, designation, department } = employee;
-    const name = user.name ?? 'Team member';
-    const loginUrl = 'https://app.aplomb.in';
-
-    await this.notifications.send({
-      userId: user.id,
-      title: `Welcome to APLOMB, ${name.split(' ')[0]}!`,
-      body: [
-        `Hi ${name}, you've been registered on the APLOMB platform.`,
-        `Employee ID: ${employeeCode}`,
-        designation ? `Role: ${designation}${department ? ' · ' + department : ''}` : '',
-        `Check your email for a login invitation, then sign in at: ${loginUrl}`,
-      ].filter(Boolean).join('\n'),
-      type: 'WELCOME',
-      channels: ['IN_APP', 'EMAIL', 'SMS'],
+  async activate(id: string) {
+    const emp = await this.prisma.employee.findUnique({
+      where: { id },
+      select: { userId: true, user: { select: { clerkId: true } } },
     });
+    if (!emp) throw new NotFoundException('Employee not found');
+
+    const clerkId = (emp.user as any)?.clerkId as string | null;
+
+    if (clerkId) {
+      try { await this.unbanClerkUser(clerkId); } catch (e: any) {
+        this.logger.error(`Clerk unban failed for ${clerkId}: ${e.message}`);
+      }
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: emp.userId }, data: { isActive: true } }),
+      this.prisma.employee.update({ where: { id }, data: { employeeStatus: 'ACTIVE' } }),
+    ]);
+
+    return { success: true };
   }
 
-  async findAll(query: { search?: string; department?: string; page?: number; limit?: number }) {
+  // kept for backward compat
+  async deactivate(id: string) { return this.suspend(id); }
+
+  // ── List / find ─────────────────────────────────────────────────────────────
+
+  async findAll(query: {
+    search?: string; department?: string;
+    page?: number; limit?: number;
+  }) {
     const { search, department } = query;
-    const page = Math.max(1, Number(query.page ?? 1));
+    const page  = Math.max(1, Number(query.page  ?? 1));
     const limit = Math.min(200, Math.max(1, Number(query.limit ?? 20)));
-    const skip = (page - 1) * limit;
+    const skip  = (page - 1) * limit;
 
     const where: any = {};
     if (department && department !== 'all') where.department = department;
     if (search) {
       where.OR = [
-        { user: { name: { contains: search, mode: 'insensitive' } } },
-        { user: { email: { contains: search, mode: 'insensitive' } } },
-        { employeeCode: { contains: search, mode: 'insensitive' } },
-        { designation: { contains: search, mode: 'insensitive' } },
-        { department: { contains: search, mode: 'insensitive' } },
+        { user: { name:       { contains: search, mode: 'insensitive' } } },
+        { user: { email:      { contains: search, mode: 'insensitive' } } },
+        { employeeCode:       { contains: search, mode: 'insensitive' } },
+        { designation:        { contains: search, mode: 'insensitive' } },
+        { department:         { contains: search, mode: 'insensitive' } },
       ];
     }
 
@@ -179,7 +316,13 @@ export class EmployeesService {
         skip,
         take: limit,
         include: {
-          user: { select: { id: true, name: true, email: true, role: true, avatarUrl: true, phone: true, isActive: true, clerkId: true } },
+          user: {
+            select: {
+              id: true, name: true, email: true, role: true,
+              avatarUrl: true, phone: true, isActive: true,
+              clerkId: true, lastLoginAt: true,
+            },
+          },
           _count: { select: { attendanceRecords: true } },
         },
         orderBy: [{ user: { isActive: 'desc' } }, { user: { name: 'asc' } }],
@@ -196,28 +339,29 @@ export class EmployeesService {
       include: {
         user: true,
         leaveBalance: true,
-        attendanceRecords: {
-          take: 60,
-          orderBy: { date: 'desc' },
-        },
+        attendanceRecords: { take: 60, orderBy: { date: 'desc' } },
       },
     });
     if (!emp) throw new NotFoundException('Employee not found');
     return emp;
   }
 
+  // ── Update ──────────────────────────────────────────────────────────────────
+
   async update(id: string, dto: any) {
     const { name, email, role, phone, isActive, ...employeeData } = dto;
 
-    // Update linked user fields if provided
-    const emp = await this.prisma.employee.findUnique({ where: { id }, select: { userId: true } });
+    const emp = await this.prisma.employee.findUnique({
+      where: { id },
+      select: { userId: true, user: { select: { role: true, clerkId: true } } },
+    });
     if (!emp) throw new NotFoundException('Employee not found');
 
     const userUpdate: any = {};
-    if (name !== undefined) userUpdate.name = name;
-    if (email !== undefined) userUpdate.email = email;
-    if (role !== undefined) userUpdate.role = role;
-    if (phone !== undefined) userUpdate.phone = phone;
+    if (name     !== undefined) userUpdate.name     = name;
+    if (email    !== undefined) userUpdate.email    = email;
+    if (role     !== undefined) userUpdate.role     = role;
+    if (phone    !== undefined) userUpdate.phone    = phone;
     if (isActive !== undefined) userUpdate.isActive = isActive;
 
     const [updatedEmp] = await this.prisma.$transaction([
@@ -225,14 +369,19 @@ export class EmployeesService {
         where: { id },
         data: {
           ...employeeData,
-          joinDate: employeeData.joinDate ? new Date(employeeData.joinDate) : undefined,
+          joinDate:         employeeData.joinDate         ? new Date(employeeData.joinDate)         : undefined,
           confirmationDate: employeeData.confirmationDate ? new Date(employeeData.confirmationDate) : undefined,
-          basicSalary: employeeData.basicSalary !== undefined ? parseFloat(String(employeeData.basicSalary)) : undefined,
-          hra: employeeData.hra !== undefined ? parseFloat(String(employeeData.hra)) : undefined,
-          otherAllowances: employeeData.otherAllowances !== undefined ? parseFloat(String(employeeData.otherAllowances)) : undefined,
+          basicSalary:      employeeData.basicSalary      !== undefined ? parseFloat(String(employeeData.basicSalary))      : undefined,
+          hra:              employeeData.hra              !== undefined ? parseFloat(String(employeeData.hra))              : undefined,
+          otherAllowances:  employeeData.otherAllowances  !== undefined ? parseFloat(String(employeeData.otherAllowances))  : undefined,
         },
         include: {
-          user: { select: { id: true, name: true, email: true, role: true, phone: true, avatarUrl: true, isActive: true } },
+          user: {
+            select: {
+              id: true, name: true, email: true, role: true,
+              phone: true, avatarUrl: true, isActive: true, clerkId: true,
+            },
+          },
         },
       }),
       ...(Object.keys(userUpdate).length > 0
@@ -240,51 +389,51 @@ export class EmployeesService {
         : []),
     ]);
 
+    // Sync role change to Clerk metadata
+    const prevRole = (emp.user as any)?.role;
+    const clerkId  = (emp.user as any)?.clerkId as string | null;
+    if (role && role !== prevRole && clerkId) {
+      this.syncRoleToClerk(clerkId, role).catch(() => null);
+    }
+
     return updatedEmp;
   }
 
-  async deactivate(id: string) {
-    const emp = await this.prisma.employee.findUnique({ where: { id }, select: { userId: true } });
-    if (!emp) throw new NotFoundException('Employee not found');
-    await this.prisma.user.update({ where: { id: emp.userId }, data: { isActive: false } });
-    return { success: true };
-  }
-
-  async activate(id: string) {
-    const emp = await this.prisma.employee.findUnique({ where: { id }, select: { userId: true } });
-    if (!emp) throw new NotFoundException('Employee not found');
-    await this.prisma.user.update({ where: { id: emp.userId }, data: { isActive: true } });
-    return { success: true };
-  }
+  // ── Attendance / counts ─────────────────────────────────────────────────────
 
   async getAttendanceSummary(id: string, month: number, year: number) {
     const start = new Date(year, month - 1, 1);
-    const end = new Date(year, month, 0);
+    const end   = new Date(year, month,     0);
 
     const records = await this.prisma.attendanceRecord.findMany({
       where: { employeeId: id, date: { gte: start, lte: end } },
       orderBy: { date: 'asc' },
     });
 
-    const summary = {
-      total: records.length,
-      present: records.filter((r) => r.status === 'PRESENT').length,
-      absent: records.filter((r) => r.status === 'ABSENT').length,
-      leave: records.filter((r) => r.status === 'LEAVE').length,
-      halfDay: records.filter((r) => r.status === 'HALF_DAY').length,
-      totalWorkHours: records.reduce((sum, r) => sum + Number(r.workHours || 0), 0),
+    return {
+      records,
+      summary: {
+        total:          records.length,
+        present:        records.filter(r => r.status === 'PRESENT').length,
+        absent:         records.filter(r => r.status === 'ABSENT').length,
+        leave:          records.filter(r => r.status === 'LEAVE').length,
+        halfDay:        records.filter(r => r.status === 'HALF_DAY').length,
+        totalWorkHours: records.reduce((s, r) => s + Number(r.workHours || 0), 0),
+      },
     };
-
-    return { records, summary };
   }
 
   async getCaseCount(userId: string) {
     const [total, completed] = await Promise.all([
       this.prisma.case.count({ where: { engineerId: userId } }),
-      this.prisma.case.count({ where: { engineerId: userId, status: { in: ['SENT_TO_BANK', 'FINALIZED', 'CLOSED'] } } }),
+      this.prisma.case.count({
+        where: { engineerId: userId, status: { in: ['SENT_TO_BANK', 'FINALIZED', 'CLOSED'] } },
+      }),
     ]);
     return { total, completed };
   }
+
+  // ── Documents ───────────────────────────────────────────────────────────────
 
   async uploadDocument(id: string, file: Express.Multer.File, docType: string) {
     const field = DOC_FIELD_MAP[docType];
@@ -293,7 +442,6 @@ export class EmployeesService {
     const ext = file.originalname.split('.').pop() ?? 'bin';
     const key = `employees/${id}/${docType}-${Date.now()}.${ext}`;
     await this.storage.upload(key, file.buffer, file.mimetype);
-
     await this.prisma.employee.update({ where: { id }, data: { [field]: key } });
     return { key, url: this.storage.getPublicUrl(key) };
   }
@@ -307,7 +455,6 @@ export class EmployeesService {
 
     const key = (emp as any)[field] as string | null;
     if (key) await this.storage.delete(key);
-
     await this.prisma.employee.update({ where: { id }, data: { [field]: null } });
     return { success: true };
   }
@@ -315,7 +462,10 @@ export class EmployeesService {
   async getDocumentUrls(id: string) {
     const emp = await this.prisma.employee.findUnique({
       where: { id },
-      select: { aadhaarS3Key: true, panS3Key: true, drivingLicenseS3Key: true, agreementS3Key: true, photoS3Key: true },
+      select: {
+        aadhaarS3Key: true, panS3Key: true, drivingLicenseS3Key: true,
+        agreementS3Key: true, photoS3Key: true,
+      },
     });
     if (!emp) throw new NotFoundException('Employee not found');
 
@@ -325,6 +475,27 @@ export class EmployeesService {
       result[type] = key ? this.storage.getPublicUrl(key) : null;
     }
     return result;
+  }
+
+  // ── Private helpers ─────────────────────────────────────────────────────────
+
+  private async sendWelcome(employee: any) {
+    const { user, employeeCode, designation, department } = employee;
+    const name     = user.name ?? 'Team member';
+    const loginUrl = 'https://app.aplomb.in';
+
+    await this.notifications.send({
+      userId: user.id,
+      title:  `Welcome to APLOMB, ${name.split(' ')[0]}!`,
+      body: [
+        `Hi ${name}, you've been added to the APLOMB platform.`,
+        `Employee ID: ${employeeCode}`,
+        designation ? `Role: ${designation}${department ? ' · ' + department : ''}` : '',
+        `Check your email for a login invitation from Clerk, then sign in at: ${loginUrl}`,
+      ].filter(Boolean).join('\n'),
+      type:     'WELCOME',
+      channels: ['IN_APP', 'SMS'],
+    });
   }
 
   private async generateEmployeeCode(): Promise<string> {
