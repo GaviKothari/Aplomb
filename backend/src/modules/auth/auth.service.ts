@@ -18,24 +18,37 @@ export class AuthService {
       const name = [data.first_name, data.last_name].filter(Boolean).join(' ') || email;
       const role = (data.public_metadata?.role as UserRole) || UserRole.ENGINEER;
 
-      await this.prisma.user.upsert({
-        where: { clerkId: data.id },
-        update: {
-          email,
-          name,
-          avatarUrl: data.image_url,
-          phone: data.phone_numbers?.[0]?.phone_number,
-          role,
-        },
-        create: {
-          clerkId: data.id,
-          email,
-          name,
-          avatarUrl: data.image_url,
-          phone: data.phone_numbers?.[0]?.phone_number,
-          role,
-        },
-      });
+      // If admin pre-created this user by email (clerkId still null), link instead of duplicating
+      const preCreated = email
+        ? await this.prisma.user.findFirst({ where: { email, clerkId: null } })
+        : null;
+
+      if (preCreated) {
+        await this.prisma.user.update({
+          where: { id: preCreated.id },
+          data: { clerkId: data.id, name, avatarUrl: data.image_url, role },
+        });
+        this.logger.log(`Linked Clerk ${data.id} to pre-created user ${email}`);
+      } else {
+        await this.prisma.user.upsert({
+          where: { clerkId: data.id },
+          update: {
+            email,
+            name,
+            avatarUrl: data.image_url,
+            phone: data.phone_numbers?.[0]?.phone_number,
+            role,
+          },
+          create: {
+            clerkId: data.id,
+            email,
+            name,
+            avatarUrl: data.image_url,
+            phone: data.phone_numbers?.[0]?.phone_number,
+            role,
+          },
+        });
+      }
     }
 
     if (type === 'user.deleted') {

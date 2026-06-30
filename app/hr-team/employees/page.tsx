@@ -17,7 +17,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { EmployeeFormDialog } from '@/components/employees/employee-form-dialog'
 import { useEmployees, useResendWelcome } from '@/lib/api/hooks'
 import {
-  Plus, Search, Mail, Phone, Eye, Users, UserCheck, UserX, Building2, Send,
+  Plus, Search, Mail, Phone, Eye, Users, UserCheck, UserX, Building2, Send, MailWarning,
 } from 'lucide-react'
 
 const DEPARTMENTS = [
@@ -237,12 +237,19 @@ export default function EmployeesPage() {
                           {emp.joinDate ? new Date(emp.joinDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
                         </TableCell>
                         <TableCell>
-                          <Badge className={isActive
-                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 text-xs'
-                            : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 text-xs'
-                          }>
-                            {isActive ? 'Active' : 'Inactive'}
-                          </Badge>
+                          <div className="flex flex-col gap-1">
+                            <Badge className={isActive
+                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 text-xs w-fit'
+                              : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 text-xs w-fit'
+                            }>
+                              {isActive ? 'Active' : 'Inactive'}
+                            </Badge>
+                            {!emp.user?.clerkId && (
+                              <span className="flex items-center gap-1 text-[10px] text-amber-600 font-medium">
+                                <MailWarning className="w-3 h-3" />Invite pending
+                              </span>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
@@ -257,7 +264,7 @@ export default function EmployeesPage() {
                               className="h-7 gap-1 text-xs text-muted-foreground hover:text-blue-600"
                               disabled={resendWelcome.isPending}
                               onClick={() => resendWelcome.mutate(emp.id)}
-                              title="Resend welcome email & SMS"
+                              title={emp.user?.clerkId ? 'Resend welcome notification' : 'Resend Clerk invite'}
                             >
                               <Send className="w-3 h-3" />
                             </Button>

@@ -1,7 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/services/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import axios from 'axios';
 
 const DOC_FIELD_MAP: Record<string, string> = {
   aadhaar:       'aadhaarS3Key',
@@ -14,10 +16,13 @@ const DOC_FIELD_MAP: Record<string, string> = {
 
 @Injectable()
 export class EmployeesService {
+  private readonly logger = new Logger(EmployeesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly notifications: NotificationsService,
+    private readonly config: ConfigService,
   ) {}
 
   async create(dto: any, _createdById: string) {
@@ -80,7 +85,9 @@ export class EmployeesService {
       },
     });
 
-    // Fire-and-forget welcome message — don't block the response
+    // Fire-and-forget: send Clerk invite so employee can log in + in-app welcome
+    const userRole = (employee as any).user?.role ?? dto.role ?? 'ENGINEER';
+    this.sendClerkInvitation((employee as any).user.email, userRole).catch(() => null);
     this.sendWelcome(employee).catch(() => null);
 
     return employee;
@@ -90,12 +97,46 @@ export class EmployeesService {
     const employee = await this.prisma.employee.findUnique({
       where: { id: employeeId },
       include: {
-        user: { select: { id: true, name: true, email: true, phone: true } },
+        user: { select: { id: true, name: true, email: true, phone: true, role: true, clerkId: true } },
       },
     });
     if (!employee) throw new NotFoundException('Employee not found');
+
+    // Re-send Clerk invite only if they haven't linked a Clerk account yet
+    if (!(employee as any).user.clerkId) {
+      await this.sendClerkInvitation((employee as any).user.email, (employee as any).user.role);
+    }
     await this.sendWelcome(employee);
-    return { sent: true, to: employee.user.email };
+    return { sent: true, to: (employee as any).user.email };
+  }
+
+  private async sendClerkInvitation(email: string, role: string): Promise<void> {
+    const secretKey = this.config.get<string>('clerk.secretKey');
+    if (!secretKey) {
+      this.logger.warn('CLERK_SECRET_KEY not set — skipping Clerk invitation');
+      return;
+    }
+    try {
+      await axios.post(
+        'https://api.clerk.com/v1/invitations',
+        {
+          email_address: email,
+          public_metadata: { role },
+          redirect_url: 'https://app.aplomb.in',
+          notify: true,
+        },
+        { headers: { Authorization: `Bearer ${secretKey}`, 'Content-Type': 'application/json' } },
+      );
+      this.logger.log(`Clerk invitation sent to ${email}`);
+    } catch (e: any) {
+      const msg = e.response?.data?.errors?.[0]?.long_message ?? e.response?.data?.errors?.[0]?.message ?? e.message;
+      // "already invited" is not a real error — the invite already exists
+      if (e.response?.status === 422 && msg?.toLowerCase().includes('already')) {
+        this.logger.log(`Clerk invitation already exists for ${email}`);
+      } else {
+        this.logger.error(`Clerk invitation failed for ${email}: ${msg}`);
+      }
+    }
   }
 
   private async sendWelcome(employee: any) {
@@ -110,7 +151,7 @@ export class EmployeesService {
         `Hi ${name}, you've been registered on the APLOMB platform.`,
         `Employee ID: ${employeeCode}`,
         designation ? `Role: ${designation}${department ? ' · ' + department : ''}` : '',
-        `Log in at: ${loginUrl}`,
+        `Check your email for a login invitation, then sign in at: ${loginUrl}`,
       ].filter(Boolean).join('\n'),
       type: 'WELCOME',
       channels: ['IN_APP', 'EMAIL', 'SMS'],
@@ -141,7 +182,7 @@ export class EmployeesService {
         skip,
         take: limit,
         include: {
-          user: { select: { id: true, name: true, email: true, role: true, avatarUrl: true, phone: true, isActive: true } },
+          user: { select: { id: true, name: true, email: true, role: true, avatarUrl: true, phone: true, isActive: true, clerkId: true } },
           _count: { select: { attendanceRecords: true } },
         },
         orderBy: [{ user: { isActive: 'desc' } }, { user: { name: 'asc' } }],
