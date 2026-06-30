@@ -50,24 +50,45 @@ export class EmployeesService {
     return this.config.get<string>('clerk.secretKey') ?? '';
   }
 
-  /** Send a Clerk invitation email. Clerk sends the email itself — no Resend needed. */
+  private get resendApiKey(): string {
+    return this.config.get<string>('email.resendApiKey') ?? '';
+  }
+
+  private get emailFrom(): string {
+    return this.config.get<string>('email.from') || 'onboarding@resend.dev';
+  }
+
+  /**
+   * Create a Clerk invitation and immediately send a login-credential email
+   * via Resend. Clerk's own email delivery is unreliable / goes to spam —
+   * we use the `url` in the Clerk API response to build our own email.
+   */
   private async sendClerkInvitation(
     email: string,
     role: string,
-  ): Promise<{ success: boolean; invitationId?: string; error?: string }> {
+    name?: string,
+  ): Promise<{ success: boolean; invitationId?: string; invitationUrl?: string; error?: string }> {
     if (!this.clerkSecret) {
       this.logger.warn('CLERK_SECRET_KEY not set — skipping invitation');
       return { success: false, error: 'CLERK_SECRET_KEY not configured' };
     }
     try {
-      const res = await clerkRequest<{ id: string }>(
+      const res = await clerkRequest<{ id: string; url?: string }>(
         this.clerkSecret,
         'POST',
         '/invitations',
         { email_address: email, public_metadata: { role } },
       );
       this.logger.log(`Clerk invitation created for ${email} (id=${res.id})`);
-      return { success: true, invitationId: res.id };
+
+      // Send our own email via Resend — more reliable than Clerk's built-in delivery
+      if (res.url) {
+        await this.sendInvitationEmail(email, name ?? email, role, res.url).catch(e =>
+          this.logger.error(`Resend invite email failed for ${email}: ${e.message}`),
+        );
+      }
+
+      return { success: true, invitationId: res.id, invitationUrl: res.url };
     } catch (e: any) {
       const errBody = e.response?.data;
       const msg: string =
@@ -90,6 +111,83 @@ export class EmployeesService {
       );
       return { success: false, error: msg };
     }
+  }
+
+  /** Send the "You're invited to APLOMB" email via Resend with the Clerk sign-up link. */
+  private async sendInvitationEmail(
+    to: string,
+    name: string,
+    role: string,
+    invitationUrl: string,
+  ): Promise<void> {
+    if (!this.resendApiKey) {
+      this.logger.warn('RESEND_API_KEY not set — skipping invitation email');
+      return;
+    }
+
+    const roleName: Record<string, string> = {
+      ENGINEER: 'Site Engineer', COORDINATOR: 'Coordinator', VERIFIER: 'Verifier',
+      REPORT_MAKER: 'Report Maker', FINALIZER: 'Finalizer', ACCOUNTS: 'Accounts',
+      HR: 'HR', MIS_EXECUTIVE: 'MIS Executive', VIEWER: 'Viewer', ADMIN: 'Admin',
+    };
+    const displayRole = roleName[role] ?? role;
+    const firstName   = name.split(' ')[0];
+
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 16px">
+  <tr><td align="center">
+    <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08)">
+      <tr>
+        <td style="background:linear-gradient(135deg,#1e40af,#3b82f6);padding:36px 40px">
+          <h1 style="color:#fff;margin:0;font-size:26px;font-weight:700;letter-spacing:-0.5px">APLOMB</h1>
+          <p style="color:rgba(255,255,255,.8);margin:6px 0 0;font-size:13px">Property Intelligence Platform</p>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:36px 40px">
+          <p style="color:#1e293b;font-size:16px;margin:0 0 12px;font-weight:600">Hi ${firstName} 👋</p>
+          <p style="color:#475569;font-size:15px;line-height:1.65;margin:0 0 24px">
+            You've been added to APLOMB as a <strong style="color:#1e293b">${displayRole}</strong>.
+            Click the button below to set up your account and create your password.
+          </p>
+          <table cellpadding="0" cellspacing="0" style="margin:0 0 28px">
+            <tr>
+              <td style="background:#2563eb;border-radius:10px">
+                <a href="${invitationUrl}"
+                   style="display:inline-block;padding:14px 32px;color:#fff;font-size:15px;font-weight:600;text-decoration:none;letter-spacing:0.2px">
+                  Set Up My Account →
+                </a>
+              </td>
+            </tr>
+          </table>
+          <p style="color:#94a3b8;font-size:12px;margin:0 0 8px">Or copy this link into your browser:</p>
+          <p style="color:#3b82f6;font-size:12px;word-break:break-all;margin:0 0 28px">${invitationUrl}</p>
+          <div style="background:#f8fafc;border-radius:10px;padding:16px 20px">
+            <p style="color:#64748b;font-size:13px;margin:0 0 4px">Once set up, you can log in at:</p>
+            <a href="https://app.aplomb.in" style="color:#2563eb;font-size:13px;font-weight:600;text-decoration:none">https://app.aplomb.in</a>
+          </div>
+          <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0">
+          <p style="color:#cbd5e1;font-size:11px;margin:0">This link is valid for 30 days. If you didn't expect this email, you can ignore it.</p>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>`;
+
+    await axios.post(
+      'https://api.resend.com/emails',
+      {
+        from: this.emailFrom,
+        to:   [to],
+        subject: `You're invited to APLOMB — set up your account`,
+        html,
+      },
+      { headers: { Authorization: `Bearer ${this.resendApiKey}`, 'Content-Type': 'application/json' } },
+    );
+    this.logger.log(`Invitation email sent via Resend to ${to}`);
   }
 
   /** Revoke all pending Clerk invitations for an email so a fresh one can be sent. */
@@ -143,9 +241,10 @@ export class EmployeesService {
   async create(dto: any, _createdById: string) {
     const code = await this.generateEmployeeCode();
 
-    let userId = dto.userId as string | undefined;
+    let userId    = dto.userId as string | undefined;
     let userEmail = dto.email as string;
     let userRole  = dto.role ?? 'ENGINEER';
+    let userName  = dto.name as string | undefined;
 
     if (!userId) {
       if (!dto.email || !dto.name) {
@@ -181,10 +280,10 @@ export class EmployeesService {
       userId    = user.id;
       userEmail = user.email;
       userRole  = (user as any).role;
+      userName  = (user as any).name ?? userName;
     }
 
-    // Send Clerk invitation — Clerk emails the employee directly
-    const inviteResult = await this.sendClerkInvitation(userEmail, userRole);
+    const inviteResult = await this.sendClerkInvitation(userEmail, userRole, userName);
 
     const employee = await this.prisma.employee.create({
       data: {
@@ -247,7 +346,7 @@ export class EmployeesService {
     // Revoke any pending invitation first so Clerk doesn't reject as duplicate
     await this.revokeExistingInvitations(user.email);
 
-    const inviteResult = await this.sendClerkInvitation(user.email, user.role);
+    const inviteResult = await this.sendClerkInvitation(user.email, user.role, user.name);
 
     await this.prisma.employee.update({
       where: { id: employeeId },
