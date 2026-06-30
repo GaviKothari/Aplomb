@@ -51,7 +51,7 @@ export class NotificationsService {
 
     // Email
     if (channels.includes('EMAIL') && user.email) {
-      await this.sendEmail(user.email, title, body).catch((e) =>
+      await this.sendEmail(user.email, title, body, type).catch((e) =>
         this.logger.error(`Email failed: ${e.message}`),
       );
     }
@@ -133,14 +133,56 @@ export class NotificationsService {
     });
   }
 
-  private async sendEmail(to: string, subject: string, text: string) {
+  private async sendEmail(to: string, subject: string, text: string, type?: string) {
+    const html = type === 'WELCOME'
+      ? this.welcomeHtml(subject, text)
+      : `<div style="font-family:sans-serif;max-width:560px;margin:auto;padding:24px">
+           <p style="color:#1e293b;font-size:15px;line-height:1.6">${text.replace(/\n/g, '<br>')}</p>
+           <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0">
+           <p style="color:#94a3b8;font-size:12px">APLOMB Property Intelligence Platform</p>
+         </div>`;
+
     await this.mailer.sendMail({
       from: this.config.get('email.from'),
       to,
       subject,
       text,
-      html: `<p>${text}</p>`,
+      html,
     });
+  }
+
+  private welcomeHtml(_subject: string, text: string): string {
+    const lines = text.split('\n').filter(Boolean);
+    const [greeting, ...details] = lines;
+    return `<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#f8fafc;font-family:sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px">
+  <tr><td align="center">
+    <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08)">
+      <!-- Header -->
+      <tr><td style="background:linear-gradient(135deg,#1d4ed8,#3b82f6);padding:32px 40px;text-align:center">
+        <p style="margin:0;color:#ffffff;font-size:26px;font-weight:700;letter-spacing:-0.5px">APLOMB</p>
+        <p style="margin:6px 0 0;color:#bfdbfe;font-size:13px">Property Intelligence Platform</p>
+      </td></tr>
+      <!-- Body -->
+      <tr><td style="padding:36px 40px">
+        <p style="margin:0 0 16px;color:#0f172a;font-size:18px;font-weight:600">${greeting}</p>
+        ${details.map(d => `<p style="margin:8px 0;color:#475569;font-size:14px;line-height:1.6">${d}</p>`).join('')}
+        <div style="margin:28px 0;text-align:center">
+          <a href="https://app.aplomb.in" style="display:inline-block;padding:12px 28px;background:#1d4ed8;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;border-radius:8px">
+            Log in to APLOMB →
+          </a>
+        </div>
+        <p style="margin:0;color:#94a3b8;font-size:12px">If you weren't expecting this, please contact your administrator.</p>
+      </td></tr>
+      <!-- Footer -->
+      <tr><td style="background:#f1f5f9;padding:16px 40px;text-align:center">
+        <p style="margin:0;color:#94a3b8;font-size:11px">© ${new Date().getFullYear()} APLOMB · noreply@aplomb.in</p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>`;
   }
 
   private async sendSms(phone: string, message: string) {

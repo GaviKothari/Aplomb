@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/services/storage.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const DOC_FIELD_MAP: Record<string, string> = {
   aadhaar:       'aadhaarS3Key',
@@ -20,6 +21,7 @@ export class EmployeesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async create(dto: any, _createdById: string) {
@@ -62,7 +64,7 @@ export class EmployeesService {
       userId = user.id;
     }
 
-    return this.prisma.employee.create({
+    const employee = await this.prisma.employee.create({
       data: {
         employeeCode: code,
         department: dto.department,
@@ -80,6 +82,30 @@ export class EmployeesService {
       include: {
         user: { select: { id: true, name: true, email: true, role: true, phone: true, avatarUrl: true } },
       },
+    });
+
+    // Fire-and-forget welcome message — don't block the response
+    this.sendWelcome(employee).catch(() => null);
+
+    return employee;
+  }
+
+  private async sendWelcome(employee: any) {
+    const { user, employeeCode, designation, department } = employee;
+    const name = user.name ?? 'Team member';
+    const loginUrl = 'https://app.aplomb.in';
+
+    await this.notifications.send({
+      userId: user.id,
+      title: `Welcome to APLOMB, ${name.split(' ')[0]}!`,
+      body: [
+        `Hi ${name}, you've been registered on the APLOMB platform.`,
+        `Employee ID: ${employeeCode}`,
+        designation ? `Role: ${designation}${department ? ' · ' + department : ''}` : '',
+        `Log in at: ${loginUrl}`,
+      ].filter(Boolean).join('\n'),
+      type: 'WELCOME',
+      channels: ['IN_APP', 'EMAIL', 'SMS'],
     });
   }
 
