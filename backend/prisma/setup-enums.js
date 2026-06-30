@@ -55,21 +55,21 @@ async function main() {
     );
   }
 
-  // Change constructionStage from enum to TEXT on valuation_reports
+  // Change constructionStage from enum to TEXT on reports table
+  // (model Report maps to @@map("reports"), NOT "valuation_reports")
   await exec(
-    `ALTER TABLE "valuation_reports" ALTER COLUMN "constructionStage" TYPE TEXT USING "constructionStage"::TEXT`,
-    'valuation_reports.constructionStage → TEXT',
+    `ALTER TABLE "reports" ALTER COLUMN "constructionStage" TYPE TEXT USING "constructionStage"::TEXT`,
+    'reports.constructionStage → TEXT',
   );
 
-  // Change propertyType from enum to TEXT on cases and valuation_reports
-  // so any string (e.g. "Builder Flat", "DDA LIG Flat") can be stored.
+  // Change propertyType from enum to TEXT on cases and reports
   await exec(
     `ALTER TABLE "cases" ALTER COLUMN "propertyType" TYPE TEXT USING "propertyType"::TEXT`,
     'cases.propertyType → TEXT',
   );
   await exec(
-    `ALTER TABLE "valuation_reports" ALTER COLUMN "propertyType" TYPE TEXT USING "propertyType"::TEXT`,
-    'valuation_reports.propertyType → TEXT',
+    `ALTER TABLE "reports" ALTER COLUMN "propertyType" TYPE TEXT USING "propertyType"::TEXT`,
+    'reports.propertyType → TEXT',
   );
 
   // New employee columns
