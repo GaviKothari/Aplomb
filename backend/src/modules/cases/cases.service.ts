@@ -61,7 +61,7 @@ export class CasesService {
         longitude: dto.longitude ? dto.longitude : undefined,
         siteVisitDate: dto.siteVisitDate ? new Date(dto.siteVisitDate) : undefined,
         slaDeadline: dto.slaDeadline ? new Date(dto.slaDeadline) : undefined,
-      },
+      } as any,
       include: this.caseInclude(),
     });
 
@@ -460,7 +460,7 @@ export class CasesService {
       media: {
         select: {
           id: true, cdnUrl: true, s3Key: true, mediaType: true,
-          category: true, caption: true, createdAt: true,
+          category: true, createdAt: true,
         },
         orderBy: { createdAt: 'asc' as const },
       },
