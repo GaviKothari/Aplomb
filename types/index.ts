@@ -1,4 +1,14 @@
-export type UserRole = 'admin' | 'engineer' | 'verifier' | 'coordinator' | 'hr' | 'accounts'
+export type UserRole =
+  | 'admin'
+  | 'engineer'
+  | 'coordinator'
+  | 'verifier'
+  | 'report_maker'
+  | 'finalizer'
+  | 'hr'
+  | 'accounts'
+  | 'mis_executive'
+  | 'viewer'
 
 export type Permission = 
   | 'view_dashboard'

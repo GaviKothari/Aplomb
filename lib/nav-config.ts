@@ -1,20 +1,7 @@
 import {
-  BarChart3,
-  Briefcase,
-  Building2,
-  Users,
-  DollarSign,
-  Settings,
-  FileText,
-  GitBranch,
-  Clock,
-  MapPin,
-  MessageSquare,
-  Zap,
-  LayoutTemplate,
-  Upload,
-  CalendarDays,
-  type LucideIcon,
+  BarChart3, Briefcase, Building2, Users, DollarSign, Settings,
+  FileText, GitBranch, Clock, MapPin, MessageSquare, Zap,
+  LayoutTemplate, Upload, CalendarDays, type LucideIcon,
 } from 'lucide-react'
 import { UserRole } from '@/types'
 
@@ -32,6 +19,10 @@ export interface NavSection {
   items: NavItem[]
 }
 
+// Shorthand sets used throughout
+const ALL: UserRole[] = ['admin', 'coordinator', 'engineer', 'report_maker', 'verifier', 'finalizer', 'hr', 'accounts', 'mis_executive', 'viewer']
+const OPS: UserRole[] = ['admin', 'coordinator', 'engineer', 'report_maker', 'verifier', 'finalizer']
+
 export const navConfig: NavSection[] = [
   {
     title: 'Main',
@@ -40,7 +31,7 @@ export const navConfig: NavSection[] = [
         title: 'Dashboard',
         href: '/dashboard',
         icon: BarChart3,
-        visibleFor: ['admin', 'engineer', 'verifier', 'coordinator', 'hr', 'accounts'],
+        visibleFor: ALL,
       },
     ],
   },
@@ -51,25 +42,24 @@ export const navConfig: NavSection[] = [
         title: 'Cases',
         href: '/operations/cases',
         icon: Briefcase,
-        visibleFor: ['admin', 'engineer', 'coordinator'],
+        visibleFor: OPS,
         children: [
-          { title: 'List View', href: '/operations/cases', visibleFor: ['admin', 'engineer', 'coordinator'] },
+          { title: 'List View',    href: '/operations/cases',      visibleFor: OPS },
           { title: 'Kanban Board', href: '/operations/case-board', visibleFor: ['admin', 'coordinator'] },
-          { title: 'Bulk Import', href: '/operations/import', icon: Upload, visibleFor: ['admin', 'coordinator'] },
+          { title: 'Bulk Import',  href: '/operations/import',     icon: Upload, visibleFor: ['admin', 'coordinator'] },
         ],
       },
       {
         title: 'Verification',
         href: '/operations/verification',
         icon: GitBranch,
-        badge: '3',
-        visibleFor: ['admin', 'verifier'],
+        visibleFor: ['admin', 'verifier', 'finalizer'],
       },
       {
         title: 'Reports',
         href: '/operations/reports',
         icon: FileText,
-        visibleFor: ['admin', 'engineer', 'verifier'],
+        visibleFor: ['admin', 'coordinator', 'engineer', 'report_maker', 'verifier', 'finalizer'],
       },
     ],
   },
@@ -80,13 +70,13 @@ export const navConfig: NavSection[] = [
         title: 'Reporting Assistant',
         href: '/ai-tools/reporting-assistant',
         icon: MessageSquare,
-        visibleFor: ['admin', 'engineer'],
+        visibleFor: ['admin', 'engineer', 'report_maker'],
       },
       {
         title: 'Insights',
         href: '/ai-tools/insights',
         icon: Zap,
-        visibleFor: ['admin', 'coordinator'],
+        visibleFor: ['admin', 'coordinator', 'mis_executive'],
       },
     ],
   },
@@ -103,7 +93,7 @@ export const navConfig: NavSection[] = [
         title: 'MIS Dashboard',
         href: '/management/mis-dashboard',
         icon: BarChart3,
-        visibleFor: ['admin', 'coordinator'],
+        visibleFor: ['admin', 'coordinator', 'mis_executive'],
       },
       {
         title: 'Demolition Alerts',
@@ -133,7 +123,7 @@ export const navConfig: NavSection[] = [
         title: 'Travel & Expenses',
         href: '/hr-team/travel-expenses',
         icon: MapPin,
-        visibleFor: ['admin', 'hr', 'engineer'],
+        visibleFor: ['admin', 'hr', 'engineer', 'report_maker', 'coordinator', 'finalizer', 'verifier'],
       },
       {
         title: 'Leave Management',
@@ -167,7 +157,7 @@ export const navConfig: NavSection[] = [
         title: 'Analytics Dashboard',
         href: '/analytics',
         icon: BarChart3,
-        visibleFor: ['admin', 'coordinator'],
+        visibleFor: ['admin', 'coordinator', 'mis_executive'],
       },
     ],
   },

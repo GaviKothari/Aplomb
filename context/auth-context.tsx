@@ -20,8 +20,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isLoaded || !user) return
-    const clerkRole = (user.publicMetadata?.role ?? user.unsafeMetadata?.role) as UserRole | undefined
-    if (clerkRole) setCurrentRole(clerkRole)
+    // Clerk stores roles as ENGINEER/COORDINATOR (uppercase). Normalise to lowercase.
+    const raw = (user.publicMetadata?.role ?? user.unsafeMetadata?.role) as string | undefined
+    if (raw) setCurrentRole(raw.toLowerCase() as UserRole)
   }, [isLoaded, user])
 
   const checkPermission = (permission: string) => {
