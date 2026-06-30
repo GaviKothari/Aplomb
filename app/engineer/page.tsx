@@ -8,11 +8,11 @@ import Link from 'next/link'
 import { Briefcase, Clock, ChevronRight, MapPin, CheckCircle2, AlertCircle, PlayCircle } from 'lucide-react'
 
 const STATUS_COLOR: Record<string, string> = {
-  ASSIGNED:              'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
-  SITE_VISIT_SCHEDULED:  'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
-  SITE_VISIT_IN_PROGRESS:'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300',
-  SITE_VISIT_COMPLETED:  'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300',
-  REVISION_REQUESTED:    'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
+  ASSIGNED:              'bg-blue-100 text-blue-800',
+  SITE_VISIT_SCHEDULED:  'bg-amber-100 text-amber-800',
+  SITE_VISIT_IN_PROGRESS:'bg-purple-100 text-purple-800',
+  SITE_VISIT_COMPLETED:  'bg-emerald-100 text-emerald-800',
+  REVISION_REQUESTED:    'bg-red-100 text-red-800',
   NEW:                   'bg-slate-100 text-slate-700',
 }
 const STATUS_LABEL: Record<string, string> = {
@@ -48,7 +48,7 @@ export default function EngineerHomePage() {
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-gradient-to-br from-blue-600 to-blue-800 text-white px-5 pt-12 pb-8">
         <p className="text-blue-200 text-sm">{greeting} 👋</p>
@@ -57,7 +57,6 @@ export default function EngineerHomePage() {
           {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
         </p>
 
-        {/* Punch status inline */}
         <Link href="/engineer/punch-in-out">
           <div className="mt-4 flex items-center justify-between bg-white/10 backdrop-blur rounded-2xl px-4 py-3">
             <div className="flex items-center gap-3">
@@ -83,11 +82,11 @@ export default function EngineerHomePage() {
       <div className="px-5 -mt-4">
         <div className="grid grid-cols-3 gap-3">
           {[
-            { label: 'Active', count: loadingCases ? null : active.length, color: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-700 dark:text-blue-300', icon: PlayCircle },
-            { label: 'Done', count: loadingCases ? null : done.length, color: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-300', icon: CheckCircle2 },
-            { label: 'Revision', count: loadingCases ? null : revision.length, color: 'bg-red-50 dark:bg-red-950/30', text: 'text-red-700 dark:text-red-300', icon: AlertCircle },
+            { label: 'Active',   count: loadingCases ? null : active.length,   color: 'bg-blue-50',    text: 'text-blue-700',    icon: PlayCircle },
+            { label: 'Done',     count: loadingCases ? null : done.length,     color: 'bg-emerald-50', text: 'text-emerald-700', icon: CheckCircle2 },
+            { label: 'Revision', count: loadingCases ? null : revision.length, color: 'bg-red-50',     text: 'text-red-700',     icon: AlertCircle },
           ].map(({ label, count, color, text, icon: Icon }) => (
-            <div key={label} className={`${color} rounded-2xl p-3 flex flex-col items-center gap-1`}>
+            <div key={label} className={`${color} rounded-2xl p-3 flex flex-col items-center gap-1 border border-white shadow-sm`}>
               <Icon className={`w-4 h-4 ${text}`} />
               <p className={`text-2xl font-bold ${text}`}>{count ?? '—'}</p>
               <p className={`text-[11px] font-medium ${text} opacity-80`}>{label}</p>
@@ -99,7 +98,7 @@ export default function EngineerHomePage() {
       {/* Today's visits callout */}
       {todayVisits.length > 0 && (
         <div className="px-5 mt-6">
-          <h2 className="font-semibold text-base mb-2 flex items-center gap-2">
+          <h2 className="font-semibold text-base text-gray-900 mb-2 flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse inline-block" />
             Today's Visits
           </h2>
@@ -108,11 +107,11 @@ export default function EngineerHomePage() {
               const status = (c.status ?? '').toUpperCase()
               return (
                 <Link key={c.id} href={`/engineer/cases/${c.id}`}>
-                  <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-2xl p-4 active:scale-[0.98] transition-transform">
+                  <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 active:scale-[0.98] transition-transform">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold line-clamp-1">{c.ownerName ?? 'Unknown Owner'}</p>
-                        <p className="text-xs text-muted-foreground line-clamp-1 mt-0.5">{c.propertyAddress}</p>
+                        <p className="text-sm font-semibold text-gray-900 line-clamp-1">{c.ownerName ?? 'Unknown Owner'}</p>
+                        <p className="text-xs text-gray-500 line-clamp-1 mt-0.5">{c.propertyAddress}</p>
                       </div>
                       <Badge className={`text-[10px] shrink-0 ${STATUS_COLOR[status] ?? 'bg-slate-100 text-slate-700'}`}>
                         {STATUS_LABEL[status] ?? status}
@@ -129,8 +128,8 @@ export default function EngineerHomePage() {
       {/* All active cases */}
       <div className="px-5 mt-6">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="font-semibold text-base">My Cases</h2>
-          <Link href="/engineer/cases" className="text-sm text-blue-600 dark:text-blue-400 font-medium">
+          <h2 className="font-semibold text-base text-gray-900">My Cases</h2>
+          <Link href="/engineer/cases" className="text-sm text-blue-600 font-medium">
             View all →
           </Link>
         </div>
@@ -141,11 +140,11 @@ export default function EngineerHomePage() {
           </div>
         ) : cases.length === 0 ? (
           <div className="flex flex-col items-center py-16 gap-3 text-center">
-            <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
-              <Briefcase className="w-7 h-7 text-muted-foreground" />
+            <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center">
+              <Briefcase className="w-7 h-7 text-gray-400" />
             </div>
-            <p className="font-medium">No cases assigned yet</p>
-            <p className="text-sm text-muted-foreground">Your coordinator will assign cases here</p>
+            <p className="font-medium text-gray-900">No cases assigned yet</p>
+            <p className="text-sm text-gray-500">Your coordinator will assign cases here</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -153,33 +152,33 @@ export default function EngineerHomePage() {
               const status = (c.status ?? '').toUpperCase()
               return (
                 <Link key={c.id} href={`/engineer/cases/${c.id}`}>
-                  <div className="bg-card border border-border rounded-2xl p-4 active:scale-[0.98] transition-transform">
+                  <div className="bg-white border border-gray-200 rounded-2xl p-4 active:scale-[0.98] transition-transform shadow-sm">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xs font-bold text-muted-foreground">
+                          <span className="text-xs font-bold text-gray-400">
                             {c.referenceNumber ?? c.caseNumber ?? c.id.slice(0,8).toUpperCase()}
                           </span>
                           <Badge className={`text-[10px] px-2 py-0 ${STATUS_COLOR[status] ?? 'bg-slate-100 text-slate-700'}`}>
                             {STATUS_LABEL[status] ?? status}
                           </Badge>
                         </div>
-                        <p className="text-sm font-semibold line-clamp-1">
+                        <p className="text-sm font-semibold text-gray-900 line-clamp-1">
                           {c.ownerName ?? 'Unknown Owner'}
                         </p>
                         <div className="flex items-center gap-1 mt-1">
-                          <MapPin className="w-3 h-3 text-muted-foreground flex-shrink-0" />
-                          <p className="text-xs text-muted-foreground line-clamp-1">
+                          <MapPin className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                          <p className="text-xs text-gray-500 line-clamp-1">
                             {c.propertyAddress ?? c.address ?? 'No address'}
                           </p>
                         </div>
                       </div>
-                      <ChevronRight className="w-5 h-5 text-muted-foreground flex-shrink-0 mt-0.5" />
+                      <ChevronRight className="w-5 h-5 text-gray-300 flex-shrink-0 mt-0.5" />
                     </div>
                     {c.siteVisitDate && (
-                      <div className="mt-2 pt-2 border-t border-border/50 flex items-center gap-1">
-                        <Clock className="w-3 h-3 text-muted-foreground" />
-                        <p className="text-[11px] text-muted-foreground">
+                      <div className="mt-2 pt-2 border-t border-gray-100 flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-gray-400" />
+                        <p className="text-[11px] text-gray-500">
                           Visit: {new Date(c.siteVisitDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                         </p>
                       </div>

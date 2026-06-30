@@ -1,21 +1,29 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { CheckCircle2, LogOut, LogIn, AlertTriangle } from 'lucide-react'
 import { useTodayAttendance, usePunchIn, usePunchOut } from '@/lib/api/hooks'
 
+function Row({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex justify-between text-sm py-2.5 border-b border-gray-100 last:border-0">
+      <span className="text-gray-500">{label}</span>
+      <span className="font-semibold text-gray-900">{value}</span>
+    </div>
+  )
+}
+
 export default function PunchInOutPage() {
   const [currentTime, setCurrentTime] = useState<string>('')
-  const [latitude, setLatitude] = useState<number | null>(null)
-  const [longitude, setLongitude] = useState<number | null>(null)
-  const [locationError, setLocationError] = useState<string | null>(null)
+  const [latitude, setLatitude]       = useState<number | null>(null)
+  const [longitude, setLongitude]     = useState<number | null>(null)
+  const [locationError, setLocationError]   = useState<string | null>(null)
   const [isGettingLocation, setIsGettingLocation] = useState(false)
 
   const { data: todayRecord, isLoading } = useTodayAttendance()
-  const punchIn = usePunchIn()
+  const punchIn  = usePunchIn()
   const punchOut = usePunchOut()
 
   const isPunchedIn = todayRecord?.punchIn && !todayRecord?.punchOut
@@ -28,30 +36,25 @@ export default function PunchInOutPage() {
     return () => clearInterval(timer)
   }, [])
 
-  useEffect(() => {
-    requestLocation()
-  }, [])
+  useEffect(() => { requestLocation() }, [])
 
   const requestLocation = () => {
-    if (!navigator.geolocation) {
-      setLocationError('Geolocation is not supported by your browser')
-      return
-    }
+    if (!navigator.geolocation) { setLocationError('Geolocation not supported'); return }
     setIsGettingLocation(true)
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLatitude(position.coords.latitude)
-        setLongitude(position.coords.longitude)
+      pos => {
+        setLatitude(pos.coords.latitude)
+        setLongitude(pos.coords.longitude)
         setLocationError(null)
         setIsGettingLocation(false)
       },
-      (error) => {
+      err => {
         const msgs: Record<number, string> = {
           1: 'Location permission denied. Please enable location access.',
           2: 'Position unavailable. Check your GPS.',
           3: 'Location request timed out.',
         }
-        setLocationError(msgs[error.code] ?? 'Unable to get location.')
+        setLocationError(msgs[err.code] ?? 'Unable to get location.')
         setIsGettingLocation(false)
       },
       { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
@@ -59,10 +62,7 @@ export default function PunchInOutPage() {
   }
 
   const handlePunch = () => {
-    if (!latitude || !longitude) {
-      requestLocation()
-      return
-    }
+    if (!latitude || !longitude) { requestLocation(); return }
     if (isPunchedIn) {
       punchOut.mutate({ lat: latitude, lng: longitude })
     } else {
@@ -75,140 +75,104 @@ export default function PunchInOutPage() {
   const getTodayHours = () => {
     if (!todayRecord?.punchIn) return 0
     const start = new Date(todayRecord.punchIn).getTime()
-    const end = todayRecord.punchOut ? new Date(todayRecord.punchOut).getTime() : Date.now()
+    const end   = todayRecord.punchOut ? new Date(todayRecord.punchOut).getTime() : Date.now()
     return (end - start) / 3_600_000
   }
 
   return (
-    <div className="p-4 space-y-6">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold tracking-tight">Punch In/Out</h1>
-          <p className="text-muted-foreground mt-2">Site Visit Check-in System</p>
-          <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">GPS geofence verification</p>
+    <div className="min-h-screen bg-gray-50 p-4 space-y-4">
+      <div className="pt-2">
+        <h1 className="text-2xl font-bold text-gray-900">Punch In / Out</h1>
+        <p className="text-gray-500 text-sm mt-0.5">GPS-verified site check-in</p>
+      </div>
+
+      {/* Clock */}
+      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-2xl py-8 text-center space-y-1 shadow-sm">
+        <p className="text-gray-500 text-sm">Current Time</p>
+        <p className="text-6xl font-bold text-blue-900 tabular-nums">{currentTime}</p>
+        <p className="text-sm text-gray-500">{new Date().toDateString()}</p>
+      </div>
+
+      {/* Location status */}
+      {latitude && longitude && !locationError && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl px-4 py-3 flex gap-3">
+          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <p className="font-semibold text-emerald-900">Location acquired</p>
+            <p className="text-xs text-emerald-700 mt-0.5">{latitude.toFixed(4)}, {longitude.toFixed(4)}</p>
+          </div>
         </div>
+      )}
 
-        {/* Clock */}
-        <Card className="border-0 shadow-sm bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950 dark:to-indigo-950">
-          <CardContent className="pt-8 pb-8 text-center space-y-2">
-            <p className="text-muted-foreground text-sm">Current Time</p>
-            <p className="text-6xl font-bold text-blue-900 dark:text-blue-300">{currentTime}</p>
-            <p className="text-sm text-muted-foreground">{new Date().toDateString()}</p>
-          </CardContent>
-        </Card>
+      {locationError && (
+        <div className="bg-red-50 border border-red-200 rounded-2xl px-4 py-3 flex gap-3">
+          <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="font-semibold text-sm text-red-900">Location Error</p>
+            <p className="text-sm text-red-700 mt-1">{locationError}</p>
+            <Button size="sm" variant="outline" onClick={requestLocation} disabled={isGettingLocation} className="mt-2 text-xs border-red-200 text-red-700 hover:bg-red-50">
+              {isGettingLocation ? 'Getting location…' : 'Retry'}
+            </Button>
+          </div>
+        </div>
+      )}
 
-        {/* Location status */}
-        {latitude && longitude && !locationError && (
-          <Card className="border-l-4 border-l-emerald-500 bg-emerald-50 dark:bg-emerald-950/20">
-            <CardContent className="pt-4 pb-4 flex gap-3">
-              <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
-              <div className="text-sm">
-                <p className="font-semibold">Location acquired</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {latitude.toFixed(4)}, {longitude.toFixed(4)}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+      {/* Status summary */}
+      <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3 shadow-sm flex items-center justify-between">
+        <div>
+          <p className="text-xs text-gray-500 mb-1">Current Status</p>
+          <Badge className={isPunchedIn ? 'bg-emerald-100 text-emerald-900' : 'bg-gray-100 text-gray-700'}>
+            {isLoading ? 'Loading…' : isPunchedIn ? 'Working' : 'Not Working'}
+          </Badge>
+          {isPunchedIn && todayRecord?.punchIn && (
+            <p className="text-xs text-gray-500 mt-1.5">
+              Punched in at {new Date(todayRecord.punchIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </p>
+          )}
+        </div>
+        <div className="text-right">
+          <p className="text-xs text-gray-500 mb-1">Today's Hours</p>
+          <p className="text-3xl font-bold text-gray-900">{getTodayHours().toFixed(1)}h</p>
+        </div>
+      </div>
 
-        {locationError && (
-          <Card className="border-l-4 border-l-red-500 bg-red-50 dark:bg-red-950/20">
-            <CardContent className="pt-4 pb-4 flex gap-3">
-              <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <p className="font-semibold text-sm text-red-900 dark:text-red-300">Location Error</p>
-                <p className="text-sm text-red-800 dark:text-red-400 mt-1">{locationError}</p>
-                <Button size="sm" variant="outline" onClick={requestLocation} disabled={isGettingLocation} className="mt-3 text-xs">
-                  {isGettingLocation ? 'Getting location…' : 'Retry'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+      {/* Action button */}
+      {!isPunchedIn ? (
+        <button
+          onClick={handlePunch}
+          disabled={isMutating || isGettingLocation}
+          className="w-full h-24 rounded-2xl text-2xl font-bold bg-emerald-600 active:bg-emerald-700 text-white flex items-center justify-center gap-3 disabled:opacity-60"
+        >
+          <LogIn className="w-8 h-8" />
+          {isMutating ? 'Punching in…' : isGettingLocation ? 'Getting location…' : 'Punch In'}
+        </button>
+      ) : (
+        <button
+          onClick={handlePunch}
+          disabled={isMutating || isGettingLocation}
+          className="w-full h-24 rounded-2xl text-2xl font-bold bg-red-600 active:bg-red-700 text-white flex items-center justify-center gap-3 disabled:opacity-60"
+        >
+          <LogOut className="w-8 h-8" />
+          {isMutating ? 'Punching out…' : 'Punch Out'}
+        </button>
+      )}
 
-        {/* Status */}
-        <Card className="border-l-4 border-l-green-500 bg-green-50 dark:bg-green-950/20">
-          <CardContent className="pt-6 flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-muted-foreground mb-2">Current Status</p>
-              <Badge className={isPunchedIn ? 'bg-emerald-200 text-emerald-900' : 'bg-slate-200 text-slate-900'}>
-                {isLoading ? 'Loading…' : isPunchedIn ? 'Working' : 'Not Working'}
-              </Badge>
-              {isPunchedIn && todayRecord?.punchIn && (
-                <p className="text-xs text-muted-foreground mt-2">
-                  Punched in at {new Date(todayRecord.punchIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </p>
-              )}
-            </div>
-            <div className="text-right">
-              <p className="text-sm font-medium text-muted-foreground mb-2">Today's Hours</p>
-              <p className="text-3xl font-bold">{getTodayHours().toFixed(1)}h</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Action button */}
-        {!isPunchedIn ? (
-          <Button
-            onClick={handlePunch}
-            disabled={isMutating || isGettingLocation}
-            size="lg"
-            className="w-full h-24 text-2xl font-bold bg-emerald-600 hover:bg-emerald-700 text-white gap-3"
-          >
-            <LogIn className="w-8 h-8" />
-            {isMutating ? 'Punching in…' : isGettingLocation ? 'Getting location…' : 'Punch In'}
-          </Button>
-        ) : (
-          <Button
-            onClick={handlePunch}
-            disabled={isMutating || isGettingLocation}
-            size="lg"
-            className="w-full h-24 text-2xl font-bold bg-red-600 hover:bg-red-700 text-white gap-3"
-          >
-            <LogOut className="w-8 h-8" />
-            {isMutating ? 'Punching out…' : 'Punch Out'}
-          </Button>
-        )}
-
-        {/* Today's record */}
-        {todayRecord && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Today's Record</CardTitle>
-              <CardDescription>{new Date().toDateString()}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Punch In</span>
-                <span className="font-mono font-semibold">
-                  {todayRecord.punchIn
-                    ? new Date(todayRecord.punchIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                    : '—'}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Punch Out</span>
-                <span className="font-mono font-semibold">
-                  {todayRecord.punchOut
-                    ? new Date(todayRecord.punchOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                    : '—'}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Geofence</span>
-                <Badge className={todayRecord.isWithinGeofence ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}>
-                  {todayRecord.isWithinGeofence ? 'Within office' : 'Outside geofence'}
-                </Badge>
-              </div>
-              {todayRecord.distanceFromOffice != null && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Distance from office</span>
-                  <span className="font-semibold">{todayRecord.distanceFromOffice}m</span>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
+      {/* Today's record */}
+      {todayRecord && (
+        <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3 shadow-sm">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Today's Record</p>
+          <Row label="Punch In"  value={todayRecord.punchIn  ? new Date(todayRecord.punchIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'} />
+          <Row label="Punch Out" value={todayRecord.punchOut ? new Date(todayRecord.punchOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'} />
+          <Row label="Geofence"  value={
+            <Badge className={todayRecord.isWithinGeofence ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}>
+              {todayRecord.isWithinGeofence ? 'Within office' : 'Outside geofence'}
+            </Badge>
+          } />
+          {todayRecord.distanceFromOffice != null && (
+            <Row label="Distance from office" value={`${todayRecord.distanceFromOffice}m`} />
+          )}
+        </div>
+      )}
     </div>
   )
 }

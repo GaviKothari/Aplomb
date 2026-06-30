@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -40,10 +39,10 @@ export default function EngineerLeavePage() {
 
   const { data: myData, isLoading: myLoading } = useMyLeave()
   const { data: balance, isLoading: balLoading } = useLeaveBalance()
-  const apply = useApplyLeave()
+  const apply  = useApplyLeave()
   const cancel = useCancelLeave()
 
-  const requests: any[] = myData?.requests ?? []
+  const requests: any[]    = myData?.requests ?? []
   const balanceList: any[] = Array.isArray(balance) ? balance : []
 
   const days = form.startDate && form.endDate
@@ -58,11 +57,11 @@ export default function EngineerLeavePage() {
   }
 
   return (
-    <div className="p-4 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="min-h-screen bg-gray-50 p-4 space-y-5">
+      <div className="flex items-center justify-between pt-2">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">My Leave</h1>
-          <p className="text-muted-foreground text-sm mt-0.5">Apply for leave and track requests</p>
+          <h1 className="text-2xl font-bold text-gray-900">My Leave</h1>
+          <p className="text-gray-500 text-sm mt-0.5">Apply for leave and track requests</p>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
@@ -97,7 +96,7 @@ export default function EngineerLeavePage() {
                 </div>
               </div>
               {days > 0 && (
-                <p className="text-xs text-muted-foreground">{days} day{days !== 1 ? 's' : ''}</p>
+                <p className="text-xs text-gray-500">{days} day{days !== 1 ? 's' : ''}</p>
               )}
               <div className="space-y-1.5">
                 <Label>Reason</Label>
@@ -114,21 +113,21 @@ export default function EngineerLeavePage() {
         </Dialog>
       </div>
 
-      {/* Leave balance cards */}
+      {/* Leave balance */}
       {balLoading ? (
         <div className="grid grid-cols-2 gap-3">
           {[1,2,3,4].map(i => <Skeleton key={i} className="h-20 rounded-xl" />)}
         </div>
       ) : balanceList.length > 0 ? (
         <div>
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Balance {new Date().getFullYear()}</p>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Balance {new Date().getFullYear()}</p>
           <div className="grid grid-cols-2 gap-3">
             {balanceList.map((b: any) => (
-              <div key={b.id} className="rounded-xl border border-border/60 p-3 space-y-1">
-                <p className="text-xs text-muted-foreground">{LEAVE_TYPES.find(t => t.value === b.leaveType)?.label ?? b.leaveType}</p>
+              <div key={b.id} className="rounded-xl border border-gray-200 bg-white shadow-sm p-3 space-y-1">
+                <p className="text-xs text-gray-500">{LEAVE_TYPES.find(t => t.value === b.leaveType)?.label ?? b.leaveType}</p>
                 <div className="flex items-end gap-1.5">
-                  <span className="text-xl font-bold">{b.remainingDays}</span>
-                  <span className="text-xs text-muted-foreground mb-0.5">/ {b.totalDays} left</span>
+                  <span className="text-xl font-bold text-gray-900">{b.remainingDays}</span>
+                  <span className="text-xs text-gray-400 mb-0.5">/ {b.totalDays} left</span>
                 </div>
                 {b.pendingDays > 0 && (
                   <p className="text-xs text-amber-600">{b.pendingDays} pending</p>
@@ -140,55 +139,55 @@ export default function EngineerLeavePage() {
       ) : null}
 
       {/* Request history */}
-      <Card className="border-0 shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <CalendarDays className="w-4 h-4" />
-            Leave Requests
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
+      <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
+          <CalendarDays className="w-4 h-4 text-gray-400" />
+          <p className="text-sm font-semibold text-gray-900">Leave Requests</p>
+        </div>
+        <div className="p-4">
           {myLoading ? (
             <div className="space-y-3">
               {[1,2,3].map(i => <Skeleton key={i} className="h-16 rounded-lg" />)}
             </div>
           ) : requests.length === 0 ? (
-            <p className="text-center text-sm text-muted-foreground py-8">No leave requests yet</p>
+            <p className="text-center text-sm text-gray-400 py-8">No leave requests yet</p>
           ) : (
             <div className="space-y-2">
               {requests.map((req: any) => {
-                const meta = STATUS_META[req.status] ?? { label: req.status, cls: 'bg-gray-100 text-gray-600' }
+                const meta       = STATUS_META[req.status] ?? { label: req.status, cls: 'bg-gray-100 text-gray-600' }
                 const leaveLabel = LEAVE_TYPES.find(t => t.value === req.leaveType)?.label ?? req.leaveType
-                const fmt = (d: string) => new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+                const fmt        = (d: string) => new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
                 return (
-                  <div key={req.id} className="flex items-start justify-between p-3 rounded-lg border border-border/40 hover:bg-muted/30">
+                  <div key={req.id} className="flex items-start justify-between p-3 rounded-xl border border-gray-100 bg-gray-50">
                     <div className="space-y-0.5">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{leaveLabel}</span>
+                        <span className="text-sm font-medium text-gray-900">{leaveLabel}</span>
                         <Badge className={`text-xs font-normal ${meta.cls}`}>{meta.label}</Badge>
                       </div>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-gray-500">
                         {fmt(req.startDate)} – {fmt(req.endDate)} · {req.totalDays} day{req.totalDays !== 1 ? 's' : ''}
                       </p>
-                      {req.reason && <p className="text-xs text-muted-foreground truncate max-w-48">{req.reason}</p>}
+                      {req.reason && <p className="text-xs text-gray-500 truncate max-w-48">{req.reason}</p>}
                       {req.approvalNote && (
-                        <p className="text-xs text-muted-foreground italic">{req.approvalNote}</p>
+                        <p className="text-xs text-gray-400 italic">{req.approvalNote}</p>
                       )}
                     </div>
                     {req.status === 'PENDING' && (
-                      <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground"
+                      <button
                         disabled={cancel.isPending}
-                        onClick={() => cancel.mutate(req.id)}>
+                        onClick={() => cancel.mutate(req.id)}
+                        className="h-7 w-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-200 active:bg-gray-300"
+                      >
                         <X className="w-3.5 h-3.5" />
-                      </Button>
+                      </button>
                     )}
                   </div>
                 )
               })}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   )
 }
