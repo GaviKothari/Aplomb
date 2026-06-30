@@ -12,7 +12,7 @@ import { StorageService } from '../../common/services/storage.service';
 // Valid status transitions
 const STATUS_TRANSITIONS: Record<CaseStatus, CaseStatus[]> = {
   NEW: [CaseStatus.ASSIGNED, CaseStatus.ON_HOLD, CaseStatus.CLOSED],
-  ASSIGNED: [CaseStatus.SITE_VISIT_SCHEDULED, CaseStatus.ON_HOLD, CaseStatus.NEW],
+  ASSIGNED: [CaseStatus.SITE_VISIT_SCHEDULED, CaseStatus.SITE_VISIT_IN_PROGRESS, CaseStatus.ON_HOLD, CaseStatus.NEW],
   SITE_VISIT_SCHEDULED: [CaseStatus.SITE_VISIT_IN_PROGRESS, CaseStatus.ON_HOLD, CaseStatus.ASSIGNED],
   SITE_VISIT_IN_PROGRESS: [CaseStatus.SITE_VISIT_COMPLETED, CaseStatus.ON_HOLD],
   SITE_VISIT_COMPLETED: [CaseStatus.UNDER_VERIFICATION, CaseStatus.ON_HOLD],
