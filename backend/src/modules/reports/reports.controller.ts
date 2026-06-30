@@ -1,6 +1,5 @@
-import { Controller, Get, Post, Patch, Body, Param, Res } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Query } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { Response } from 'express';
 import { ReportsService } from './reports.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -11,6 +10,12 @@ import { UserRole, User } from '@prisma/client';
 @Controller('reports')
 export class ReportsController {
   constructor(private readonly service: ReportsService) {}
+
+  @Get()
+  @Roles(UserRole.ADMIN, UserRole.COORDINATOR, UserRole.VERIFIER, UserRole.ACCOUNTS)
+  findAll(@Query() query: { status?: string; search?: string; page?: string; limit?: string }) {
+    return this.service.findAll(query);
+  }
 
   @Post('from-ai')
   @Roles(UserRole.ENGINEER, UserRole.ADMIN)

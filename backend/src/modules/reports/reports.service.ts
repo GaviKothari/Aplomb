@@ -15,6 +15,46 @@ export class ReportsService {
     private readonly events: EventsGateway,
   ) {}
 
+  async findAll(query: { status?: string; search?: string; page?: string; limit?: string }) {
+    const page = Math.max(1, Number(query.page ?? 1));
+    const limit = Math.min(100, Math.max(1, Number(query.limit ?? 20)));
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (query.status) where.status = query.status;
+    if (query.search) {
+      where.OR = [
+        { reportNumber: { contains: query.search, mode: 'insensitive' } },
+        { case: { caseNumber: { contains: query.search, mode: 'insensitive' } } },
+        { case: { propertyAddress: { contains: query.search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [data, total] = await Promise.all([
+      this.prisma.report.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true, reportNumber: true, status: true, revision: true,
+          totalMarketValue: true, propertyType: true,
+          createdAt: true, submittedAt: true,
+          case: {
+            select: {
+              id: true, caseNumber: true, propertyAddress: true,
+              organization: { select: { name: true } },
+            },
+          },
+          submittedBy: { select: { name: true } },
+        },
+      }),
+      this.prisma.report.count({ where }),
+    ]);
+
+    return { data, total, page, limit };
+  }
+
   async createFromAiSession(
     caseId: string,
     aiFields: Record<string, any>,

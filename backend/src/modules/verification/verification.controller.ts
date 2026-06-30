@@ -25,6 +25,12 @@ export class VerificationController {
     return this.service.startVerification(body.caseId, body.reportId, user.id);
   }
 
+  @Get('case/:caseId')
+  @ApiOperation({ summary: 'Get verification for a case' })
+  findByCase(@Param('caseId') caseId: string) {
+    return this.service.findByCase(caseId);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get verification detail with split-screen data' })
   findOne(@Param('id') id: string) {

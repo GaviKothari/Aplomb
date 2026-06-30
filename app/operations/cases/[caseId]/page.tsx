@@ -14,15 +14,18 @@ import { MediaTab } from '@/components/case-details/media-tab'
 import { VerificationTab } from '@/components/case-details/verification-tab'
 import { HistoryTab } from '@/components/case-details/history-tab'
 import { DemolitionAlertBanner } from '@/components/case-details/demolition-alert-banner'
-import { useCase } from '@/lib/api/hooks'
-import { ArrowLeft } from 'lucide-react'
+import { useCase, useFinalizeCase } from '@/lib/api/hooks'
+import { ArrowLeft, CheckCircle2, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import type { Case, CaseStatus, Priority } from '@/types'
+
+const FINALIZABLE_STATUSES = ['UNDER_VERIFICATION', 'APPROVED']
 
 export default function CaseDetailPage() {
   const params = useParams()
   const caseId = params.caseId as string
   const { data: apiCase, isLoading, error } = useCase(caseId)
+  const finalize = useFinalizeCase()
 
   if (isLoading) {
     return (
@@ -42,24 +45,22 @@ export default function CaseDetailPage() {
     )
   }
 
-  // Map API response → frontend Case type
   const caseData: Case = {
     id: apiCase.caseNumber ?? apiCase.id,
     propertyAddress: apiCase.propertyAddress,
     bank: apiCase.organization?.name ?? 'Unknown',
-    engineer: apiCase.engineer
-      ? `${apiCase.engineer.firstName ?? ''} ${apiCase.engineer.lastName ?? ''}`.trim() || apiCase.engineer.email
-      : 'Unassigned',
-    status: (apiCase.status?.toLowerCase().replace(/_/g, '_') ?? 'new') as CaseStatus,
+    engineer: apiCase.engineer?.name ?? 'Unassigned',
+    status: (apiCase.status?.toLowerCase() ?? 'new') as CaseStatus,
     priority: (apiCase.priority?.toLowerCase() ?? 'medium') as Priority,
     createdDate: apiCase.createdAt,
     lastUpdated: apiCase.updatedAt,
-    siteVisitDate: apiCase.siteVisitLogs?.[0]?.startTime ?? undefined,
+    siteVisitDate: apiCase.siteVisitLog?.startTime ?? undefined,
     amount: undefined,
   }
 
   const alert = apiCase.demolitionAlerts?.[0]
   const demolitionProperty = alert?.demolitionProperty
+  const canFinalize = FINALIZABLE_STATUSES.includes(apiCase.status)
 
   return (
     <AppLayout>
@@ -71,12 +72,23 @@ export default function CaseDetailPage() {
           </Link>
         </Button>
 
-        <div className="flex items-start justify-between">
+        <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">{caseData.id}</h1>
             <p className="text-muted-foreground mt-2">{caseData.propertyAddress}</p>
           </div>
-          <Button className="gap-2">Mark as Finalized</Button>
+          {canFinalize && (
+            <Button
+              className="gap-2 shrink-0"
+              disabled={finalize.isPending || apiCase.status === 'FINALIZED'}
+              onClick={() => finalize.mutate(caseId)}
+            >
+              {finalize.isPending
+                ? <Loader2 className="w-4 h-4 animate-spin" />
+                : <CheckCircle2 className="w-4 h-4" />}
+              Mark as Finalized
+            </Button>
+          )}
         </div>
 
         {alert && (
@@ -110,6 +122,12 @@ export default function CaseDetailPage() {
               <p className="text-sm text-muted-foreground mb-1">Engineer</p>
               <p className="font-semibold text-sm">{caseData.engineer}</p>
             </div>
+            {apiCase.coordinator && (
+              <div>
+                <p className="text-sm text-muted-foreground mb-1">Coordinator</p>
+                <p className="font-semibold text-sm">{apiCase.coordinator.name}</p>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -117,7 +135,14 @@ export default function CaseDetailPage() {
           <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="report">Report</TabsTrigger>
-            <TabsTrigger value="media">Media</TabsTrigger>
+            <TabsTrigger value="media">
+              Media
+              {apiCase.media?.length > 0 && (
+                <span className="ml-1.5 text-xs bg-blue-100 text-blue-700 rounded-full px-1.5 py-0.5">
+                  {apiCase.media.length}
+                </span>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="verification">Verification</TabsTrigger>
             <TabsTrigger value="history">History</TabsTrigger>
           </TabsList>
@@ -131,11 +156,11 @@ export default function CaseDetailPage() {
           </TabsContent>
 
           <TabsContent value="media" className="space-y-4">
-            <MediaTab />
+            <MediaTab media={apiCase.media ?? []} />
           </TabsContent>
 
           <TabsContent value="verification" className="space-y-4">
-            <VerificationTab />
+            <VerificationTab caseId={caseId} />
           </TabsContent>
 
           <TabsContent value="history" className="space-y-4">

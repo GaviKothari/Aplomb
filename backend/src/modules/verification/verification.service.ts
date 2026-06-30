@@ -127,4 +127,15 @@ export class VerificationService {
     if (!v) throw new NotFoundException('Verification not found');
     return v;
   }
+
+  async findByCase(caseId: string) {
+    return this.prisma.verification.findFirst({
+      where: { caseId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        verifier: { select: { id: true, name: true } },
+        report: { select: { id: true, reportNumber: true, totalMarketValue: true } },
+      },
+    });
+  }
 }

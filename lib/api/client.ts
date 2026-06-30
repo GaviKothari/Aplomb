@@ -122,6 +122,7 @@ export function createApiClient(getToken: () => Promise<string | null>) {
 
     // Reports
     reports: {
+      list: (p?: any) => api<any>('/reports', { params: p }),
       get: (id: string) => api<any>(`/reports/${id}`),
       createFromAi: (caseId: string, fields: any) =>
         api<any>('/reports/from-ai', { method: 'POST', body: { caseId, fields } }),
@@ -146,6 +147,7 @@ export function createApiClient(getToken: () => Promise<string | null>) {
     verification: {
       queue: () => api<any>('/verification/queue'),
       get: (id: string) => api<any>(`/verification/${id}`),
+      getForCase: (caseId: string) => api<any>(`/verification/case/${caseId}`),
       start: (caseId: string, reportId: string) =>
         api<any>('/verification/start', { method: 'POST', body: { caseId, reportId } }),
       approve: (id: string, comment?: string) =>

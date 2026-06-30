@@ -725,3 +725,41 @@ export function useMarkAllNotificationsRead() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['notifications'] }),
   });
 }
+
+// ── Reports list ──────────────────────────────────────────────
+export function useReports(query?: { status?: string; search?: string; page?: number; limit?: number }) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ['reports', query],
+    queryFn: () => api.reports.list(query),
+    staleTime: 30_000,
+  });
+}
+
+// ── Case verification lookup ──────────────────────────────────
+export function useCaseVerification(caseId: string) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ['case-verification', caseId],
+    queryFn: () => api.verification.getForCase(caseId),
+    staleTime: 60_000,
+    enabled: !!caseId,
+  });
+}
+
+// ── Finalize case ─────────────────────────────────────────────
+export function useFinalizeCase() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (caseId: string) =>
+      api.cases.updateStatus(caseId, { status: 'FINALIZED' }),
+    onSuccess: (_data, caseId) => {
+      qc.invalidateQueries({ queryKey: ['case', caseId] });
+      qc.invalidateQueries({ queryKey: ['cases'] });
+      toast.success('Case marked as finalized');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+}
+

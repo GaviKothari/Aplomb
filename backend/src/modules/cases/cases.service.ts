@@ -457,6 +457,13 @@ export class CasesService {
     return {
       ...this.caseListInclude(),
       siteVisitLog: true,
+      media: {
+        select: {
+          id: true, cdnUrl: true, s3Key: true, mediaType: true,
+          category: true, caption: true, createdAt: true,
+        },
+        orderBy: { createdAt: 'asc' as const },
+      },
       demolitionAlerts: {
         select: {
           id: true,
