@@ -2,30 +2,17 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EventsGateway } from '../../gateways/events.gateway';
-import * as nodemailer from 'nodemailer';
 import axios from 'axios';
 
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
-  private mailer: nodemailer.Transporter;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly events: EventsGateway,
-  ) {
-    // Use Resend SMTP (cost-free tier)
-    this.mailer = nodemailer.createTransport({
-      host: 'smtp.resend.com',
-      port: 465,
-      secure: true,
-      auth: {
-        user: 'resend',
-        pass: this.config.get('email.resendApiKey') || 'placeholder',
-      },
-    });
-  }
+  ) {}
 
   async send(params: {
     userId: string;
@@ -142,13 +129,28 @@ export class NotificationsService {
            <p style="color:#94a3b8;font-size:12px">APLOMB Property Intelligence Platform</p>
          </div>`;
 
-    await this.mailer.sendMail({
-      from: this.config.get('email.from'),
-      to,
-      subject,
-      text,
-      html,
-    });
+    const apiKey = this.config.get('email.resendApiKey');
+    if (!apiKey) {
+      this.logger.warn('RESEND_API_KEY not set — skipping email');
+      return;
+    }
+
+    await axios.post(
+      'https://api.resend.com/emails',
+      {
+        from: this.config.get('email.from') || 'onboarding@resend.dev',
+        to: [to],
+        subject,
+        text,
+        html,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      },
+    );
   }
 
   private welcomeHtml(_subject: string, text: string): string {
