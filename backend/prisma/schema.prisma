@@ -522,7 +522,7 @@ model Report {
   carpetArea          Decimal?  @db.Decimal(10, 2)
   plotArea            Decimal?  @db.Decimal(10, 2)
   ageOfConstruction   Int?      // years
-  roadWidth           Decimal?  @db.Decimal(5, 2) // meters
+  roadWidth           Decimal?  @db.Decimal(8, 2) // feet (up to 9,999,999.99)
   facingDirection     String?
 
   // Valuation

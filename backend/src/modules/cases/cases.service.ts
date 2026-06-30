@@ -338,7 +338,7 @@ export class CasesService {
       carpetArea:            data.carpetArea != null ? Number(data.carpetArea) : undefined,
       plotArea:              data.plotArea != null ? Number(data.plotArea) : undefined,
       ageOfConstruction:     data.ageOfConstruction != null ? Number(data.ageOfConstruction) : undefined,
-      roadWidth:             data.roadWidth != null ? Number(data.roadWidth) : undefined,
+      roadWidth:             data.roadWidth != null ? Math.min(Number(data.roadWidth), 9999) : undefined,
       facingDirection:       data.facingDirection    ?? undefined,
       landRatePerSqFt:       data.landRatePerSqFt != null ? Number(data.landRatePerSqFt) : undefined,
       buildingRatePerSqFt:   data.buildingRatePerSqFt != null ? Number(data.buildingRatePerSqFt) : undefined,

@@ -72,6 +72,12 @@ async function main() {
     'reports.propertyType → TEXT',
   );
 
+  // Expand roadWidth precision: DECIMAL(5,2) maxed out at 999.99; engineers enter feet (can exceed 1000)
+  await exec(
+    `ALTER TABLE "reports" ALTER COLUMN "roadWidth" TYPE DECIMAL(8, 2)`,
+    'reports.roadWidth → DECIMAL(8,2)',
+  );
+
   // New employee columns
   await exec(
     `ALTER TABLE "employees" ADD COLUMN IF NOT EXISTS "employeeStatus" TEXT NOT NULL DEFAULT 'ACTIVE'`,
