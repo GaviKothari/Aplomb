@@ -20,6 +20,12 @@ async function main() {
     await exec(`ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS '${v}'`, `role ${v}`);
   }
 
+  // Change constructionStage from enum to TEXT on valuation_reports
+  await exec(
+    `ALTER TABLE "valuation_reports" ALTER COLUMN "constructionStage" TYPE TEXT USING "constructionStage"::TEXT`,
+    'valuation_reports.constructionStage → TEXT',
+  );
+
   // Change propertyType from enum to TEXT on cases and valuation_reports
   // so any string (e.g. "Builder Flat", "DDA LIG Flat") can be stored.
   await exec(

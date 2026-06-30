@@ -514,7 +514,7 @@ model Report {
   // Property Information
   propertyDescription String?
   propertyType        String?
-  constructionStage   ConstructionStage?
+  constructionStage   String?
   totalFloors         Int?
   occupiedFloors      Int?
   totalArea           Decimal?  @db.Decimal(10, 2)

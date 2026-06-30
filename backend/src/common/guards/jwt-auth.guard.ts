@@ -18,6 +18,9 @@ import { UserRole } from '@prisma/client';
 export class JwtAuthGuard implements CanActivate {
   private readonly logger = new Logger(JwtAuthGuard.name);
   private jwksClient: jwksClient.JwksClient;
+  // Track which clerkIds have already had their role pushed to Clerk this
+  // container lifetime so we don't fire PATCH on every single request.
+  private readonly roleSyncedIds = new Set<string>();
 
   constructor(
     private readonly reflector: Reflector,
@@ -70,17 +73,21 @@ export class JwtAuthGuard implements CanActivate {
         throw new UnauthorizedException('Account is deactivated');
       }
 
-      // If the JWT has no role claim, the user was linked before this fix.
-      // Push the DB role to Clerk now so the next JWT carries it.
+      // If the JWT has no role claim and we haven't synced this user yet this
+      // container lifetime, push the DB role to Clerk so the next JWT has it.
       const jwtRole = (payload?.metadata as any)?.role;
-      if (!jwtRole && user.clerkId) {
+      if (!jwtRole && user.clerkId && !this.roleSyncedIds.has(user.clerkId)) {
+        this.roleSyncedIds.add(user.clerkId);
         const secretKey = this.configService.get<string>('clerk.secretKey');
         axios.patch(
           `https://api.clerk.com/v1/users/${user.clerkId}/metadata`,
           { public_metadata: { role: user.role } },
           { headers: { Authorization: `Bearer ${secretKey}` } },
         ).then(() => this.logger.log(`Backfilled role ${user.role} to Clerk for ${user.clerkId}`))
-         .catch(e => this.logger.error(`Role backfill failed for ${user.clerkId}: ${e.message}`));
+         .catch(e => {
+           this.roleSyncedIds.delete(user.clerkId!);
+           this.logger.error(`Role backfill failed for ${user.clerkId}: ${e.message}`);
+         });
       }
 
       request.user = user;
