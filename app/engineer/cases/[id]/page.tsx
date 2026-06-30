@@ -12,7 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   Phone, MapPin, Navigation, Camera, ArrowLeft,
   PlayCircle, CheckCircle2, Upload, AlertTriangle,
-  ChevronDown, ChevronUp, Loader2,
+  ChevronDown, ChevronUp, Loader2, Bot,
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -369,14 +369,23 @@ export default function EngineerCaseDetailPage() {
             </Button>
           )}
           {status === 'SITE_VISIT_IN_PROGRESS' && (
-            <Button
-              onClick={handleEndVisit}
-              disabled={updateStatus.isPending || gettingGps}
-              className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
-            >
-              <CheckCircle2 className="h-4 w-4" />
-              {gettingGps ? 'Getting GPS…' : updateStatus.isPending ? 'Saving…' : 'Complete Site Visit'}
-            </Button>
+            <div className="space-y-2">
+              <Link href={`/engineer/cases/${id}/inspect`} className="block">
+                <Button className="w-full gap-2 bg-[#075E54] hover:bg-[#064d45] text-white">
+                  <Bot className="h-4 w-4" />
+                  Start AI Inspection
+                </Button>
+              </Link>
+              <Button
+                onClick={handleEndVisit}
+                disabled={updateStatus.isPending || gettingGps}
+                variant="outline"
+                className="w-full gap-2"
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                {gettingGps ? 'Getting GPS…' : updateStatus.isPending ? 'Saving…' : 'Complete Site Visit'}
+              </Button>
+            </div>
           )}
           {status === 'SITE_VISIT_COMPLETED' && (
             <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 text-sm">
