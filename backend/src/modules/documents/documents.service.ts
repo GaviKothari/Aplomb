@@ -5,7 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/services/storage.service';
 import { OcrService } from '../document-processing/ocr/ocr.service';
 import { ExtractionService } from '../document-processing/extraction/extraction.service';
-import { PropertyMasterService } from '../property-master/property-master.service';
+import { PropertyFingerprintService } from '../property-master/property-fingerprint.service';
 import { DOCUMENT_QUEUE, JOB_PROCESS_DOC } from '../document-processing/document-processing.processor';
 import { randomUUID } from 'crypto';
 
@@ -24,13 +24,13 @@ export class DocumentsService {
   private readonly logger = new Logger(DocumentsService.name);
 
   constructor(
-    private readonly prisma:          PrismaService,
-    private readonly storage:         StorageService,
-    private readonly ocr:             OcrService,
-    private readonly extraction:      ExtractionService,
-    private readonly propertyMaster:  PropertyMasterService,
+    private readonly prisma:       PrismaService,
+    private readonly storage:      StorageService,
+    private readonly ocr:          OcrService,
+    private readonly extraction:   ExtractionService,
+    private readonly fingerprints: PropertyFingerprintService,
     @InjectQueue(DOCUMENT_QUEUE)
-    private readonly queue:           Queue,
+    private readonly queue:        Queue,
   ) {}
 
   async upload(
@@ -155,7 +155,8 @@ export class DocumentsService {
         documentId,
       }));
       const { fields: extracted, classification } = this.extraction.extractWithClassification(pageTexts, documentType);
-      await this.propertyMaster.upsertFromExtraction(caseId, documentId, extracted);
+      await this.upsertPropertyMaster(caseId, documentId, extracted);
+      this.fingerprints.saveFingerprint(caseId, extracted, {}).catch(() => null);
 
       await db.caseDocument.update({
         where: { id: documentId },
@@ -210,7 +211,8 @@ export class DocumentsService {
 
         const pageTexts = ocrResult.pages.map(p => ({ pageNumber: p.pageNumber, text: p.text, documentId }));
         const { fields: extracted, classification } = this.extraction.extractWithClassification(pageTexts, documentType);
-        await this.propertyMaster.upsertFromExtraction(caseId, documentId, extracted);
+        await this.upsertPropertyMaster(caseId, documentId, extracted);
+        this.fingerprints.saveFingerprint(caseId, extracted, {}).catch(() => null);
 
         await db.caseDocument.update({
           where: { id: documentId },
@@ -230,6 +232,76 @@ export class DocumentsService {
         }).catch(() => null);
       }
     }).catch(() => null);
+  }
+
+  private async upsertPropertyMaster(
+    caseId:     string,
+    documentId: string,
+    newFields:  ReturnType<ExtractionService['extractWithClassification']>['fields'],
+  ): Promise<void> {
+    const db = this.prisma as any;
+
+    let master = await db.propertyMaster.findUnique({ where: { caseId } });
+    if (!master) {
+      master = await db.propertyMaster.create({
+        data: {
+          id:         randomUUID(),
+          caseId,
+          version:    1,
+          status:     'DRAFT',
+          masterJson: {},
+        },
+      });
+    }
+
+    for (const f of newFields) {
+      const existing = await db.propertyField.findUnique({
+        where: { propertyMasterId_fieldKey: { propertyMasterId: master.id, fieldKey: f.fieldKey } },
+      });
+
+      if (!existing || (!existing.isManualEdit && Number(existing.confidence) < f.confidence)) {
+        await db.propertyField.upsert({
+          where:  { propertyMasterId_fieldKey: { propertyMasterId: master.id, fieldKey: f.fieldKey } },
+          create: {
+            id:               randomUUID(),
+            propertyMasterId: master.id,
+            fieldKey:         f.fieldKey,
+            label:            f.label,
+            fieldValue:       f.fieldValue,
+            confidence:       f.confidence,
+            sourcePage:       f.sourcePage,
+            sourceLine:       f.sourceLine,
+            sourceDocumentId: documentId,
+            isManualEdit:     false,
+          },
+          update: {
+            label:            f.label,
+            fieldValue:       f.fieldValue,
+            confidence:       f.confidence,
+            sourcePage:       f.sourcePage,
+            sourceLine:       f.sourceLine,
+            sourceDocumentId: documentId,
+            isManualEdit:     false,
+          },
+        });
+      }
+    }
+
+    const allFields = await db.propertyField.findMany({ where: { propertyMasterId: master.id } });
+    const masterJson: Record<string, string> = {};
+    for (const f of allFields) {
+      if (f.fieldValue) masterJson[f.fieldKey] = f.fieldValue;
+    }
+
+    // Reset to DRAFT if new fields were found and record was already locked
+    const statusReset = newFields.length > 0 && (master.status === 'CONFIRMED' || master.status === 'REVIEWED')
+      ? { status: 'DRAFT' }
+      : {};
+
+    await db.propertyMaster.update({
+      where: { id: master.id },
+      data:  { masterJson, version: { increment: 1 }, ...statusReset },
+    });
   }
 
   // ── Standard CRUD ────────────────────────────────────────────────────────────
