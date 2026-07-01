@@ -22,6 +22,22 @@ import {
   Clock, CheckCircle2, XCircle, Loader2, Share2, FileWarning,
 } from 'lucide-react'
 
+const CLASSIFIED_TYPE_LABELS: Record<string, string> = {
+  SALE_DEED:           'Sale Deed',
+  REGISTRY:            'Registry',
+  AGREEMENT_TO_SELL:   'Agreement to Sell',
+  PREVIOUS_VALUATION:  'Previous Valuation',
+  TAX_RECEIPT:         'Tax Receipt',
+  MUTATION:            'Mutation / Khatauni',
+  BUILDING_PLAN:       'Building Plan',
+  SANCTION_LETTER:     'Sanction Letter',
+  ALLOTMENT_LETTER:    'Allotment Letter',
+  POSSESSION_LETTER:   'Possession Letter',
+  CHAIN_OF_TITLE:      'Chain of Title',
+  OCCUPANCY_CERTIFICATE: 'Occupancy Certificate',
+  OTHER:               'Other',
+}
+
 const DOCUMENT_TYPES = [
   { value: 'SALE_DEED',              label: 'Sale Deed' },
   { value: 'REGISTRY_COPY',         label: 'Registry Copy' },
@@ -229,9 +245,10 @@ export function DocumentsTab({ caseId }: DocumentsTabProps) {
                 <thead>
                   <tr className="border-b text-xs text-muted-foreground">
                     <th className="text-left font-medium py-2 pr-4">File</th>
-                    <th className="text-left font-medium py-2 pr-4">Type</th>
+                    <th className="text-left font-medium py-2 pr-4">Uploaded As</th>
                     <th className="text-left font-medium py-2 pr-4">OCR</th>
                     <th className="text-left font-medium py-2 pr-4">Extraction</th>
+                    <th className="text-left font-medium py-2 pr-4">Classified As</th>
                     <th className="text-left font-medium py-2 pr-4">Size</th>
                     <th className="text-left font-medium py-2 pr-4">Uploaded</th>
                     <th className="text-right font-medium py-2">Actions</th>
@@ -245,14 +262,20 @@ export function DocumentsTab({ caseId }: DocumentsTabProps) {
                     const rawText     = (doc.pages ?? []).map((p: any) => p.rawText).filter(Boolean).join('\n\n--- Page break ---\n\n')
                     const ocrExpanded = expandedOcr === doc.id
                     const ocrDone     = doc.ocrStatus === 'DONE'
+                    const classifiedLabel = doc.classifiedType
+                      ? (CLASSIFIED_TYPE_LABELS[doc.classifiedType] ?? doc.classifiedType.replace(/_/g, ' '))
+                      : null
+                    const classConf = doc.classificationConfidence
+                      ? Math.round(Number(doc.classificationConfidence) * 100)
+                      : null
                     return (
                       <React.Fragment key={doc.id}>
                         <tr className="hover:bg-muted/30 transition-colors">
                           <td className="py-3 pr-4">
                             <div className="flex items-center gap-2">
                               <FileText className="w-4 h-4 shrink-0 text-muted-foreground" />
-                              <span className="font-medium truncate max-w-[180px]" title={doc.fileName}>
-                                {doc.fileName ?? 'document'}
+                              <span className="font-medium truncate max-w-[160px]" title={doc.originalName ?? doc.fileName}>
+                                {doc.originalName ?? doc.fileName ?? 'document'}
                               </span>
                             </div>
                           </td>
@@ -272,8 +295,24 @@ export function DocumentsTab({ caseId }: DocumentsTabProps) {
                               {ext.label}
                             </span>
                           </td>
+                          <td className="py-3 pr-4">
+                            {classifiedLabel ? (
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-medium text-violet-700 dark:text-violet-400 truncate max-w-[120px]">
+                                  {classifiedLabel}
+                                </span>
+                                {classConf !== null && (
+                                  <span className="text-[10px] text-muted-foreground">
+                                    {classConf}%
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground/40">—</span>
+                            )}
+                          </td>
                           <td className="py-3 pr-4 text-xs text-muted-foreground">
-                            {formatBytes(doc.fileSize)}
+                            {formatBytes(doc.sizeBytes ?? doc.fileSize)}
                           </td>
                           <td className="py-3 pr-4 text-xs text-muted-foreground">
                             {formatDate(doc.createdAt)}

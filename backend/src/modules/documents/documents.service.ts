@@ -151,16 +151,21 @@ export class DocumentsService {
         text:       p.text,
         documentId,
       }));
-      const extracted = this.extraction.extractFromPages(pageTexts);
+      const { fields: extracted, classification } = this.extraction.extractWithClassification(pageTexts);
       await this.upsertPropertyMaster(caseId, documentId, extracted);
 
       await db.caseDocument.update({
         where: { id: documentId },
-        data:  { extractionStatus: 'DONE' },
+        data:  {
+          extractionStatus:          'DONE',
+          classifiedType:            classification.documentType,
+          classificationConfidence:  classification.confidence,
+        },
       });
 
       this.logger.log(
-        `[DOCS] Inline processed ${documentId} — ${extracted.length} fields, engine: ${ocrResult.engine}`,
+        `[DOCS] Inline processed ${documentId} — ${extracted.length} fields, engine: ${ocrResult.engine}, ` +
+        `classified: ${classification.documentType} (${Math.round(classification.confidence * 100)}%)`,
       );
     } catch (e: any) {
       this.logger.error(`[DOCS] Inline processing error for ${documentId}: ${e.message}`);
@@ -204,15 +209,22 @@ export class DocumentsService {
         });
 
         const pageTexts = ocrResult.pages.map(p => ({ pageNumber: p.pageNumber, text: p.text, documentId }));
-        const extracted = this.extraction.extractFromPages(pageTexts);
+        const { fields: extracted, classification } = this.extraction.extractWithClassification(pageTexts);
         await this.upsertPropertyMaster(caseId, documentId, extracted);
 
         await db.caseDocument.update({
           where: { id: documentId },
-          data:  { extractionStatus: 'DONE' },
+          data:  {
+            extractionStatus:         'DONE',
+            classifiedType:           classification.documentType,
+            classificationConfidence: classification.confidence,
+          },
         });
 
-        this.logger.log(`[DOCS] Tesseract done for ${documentId} — ${extracted.length} fields`);
+        this.logger.log(
+          `[DOCS] Tesseract done for ${documentId} — ${extracted.length} fields, ` +
+          `classified: ${classification.documentType} (${Math.round(classification.confidence * 100)}%)`,
+        );
       } catch (e: any) {
         this.logger.error(`[DOCS] Tesseract background failed for ${documentId}: ${e.message}`);
         await db.caseDocument.update({
@@ -226,7 +238,7 @@ export class DocumentsService {
   private async upsertPropertyMaster(
     caseId:     string,
     documentId: string,
-    newFields:  ReturnType<ExtractionService['extractFromPages']>,
+    newFields:  ReturnType<ExtractionService['extractWithClassification']>['fields'],
   ): Promise<void> {
     const db = this.prisma as any;
 

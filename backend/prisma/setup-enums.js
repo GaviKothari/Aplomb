@@ -279,6 +279,16 @@ async function main() {
     `ALTER TABLE "employees" ADD COLUMN IF NOT EXISTS "invitationSentAt" TIMESTAMP(3)`,
     'column invitationSentAt',
   );
+
+  // Document intelligence classification columns
+  await exec(
+    `ALTER TABLE "case_documents" ADD COLUMN IF NOT EXISTS "classifiedType" TEXT`,
+    'column case_documents.classifiedType',
+  );
+  await exec(
+    `ALTER TABLE "case_documents" ADD COLUMN IF NOT EXISTS "classificationConfidence" DECIMAL(5,4)`,
+    'column case_documents.classificationConfidence',
+  );
 }
 
 main()

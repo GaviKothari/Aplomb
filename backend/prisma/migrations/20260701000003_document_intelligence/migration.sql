@@ -120,3 +120,10 @@ DO $$ BEGIN
     FOREIGN KEY ("propertyMasterId") REFERENCES "property_master"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+
+-- Document intelligence: classified type + confidence
+ALTER TABLE "case_documents" ADD COLUMN IF NOT EXISTS "classifiedType" TEXT;
+ALTER TABLE "case_documents" ADD COLUMN IF NOT EXISTS "classificationConfidence" DECIMAL(5,4);
+
+-- Property fields label column
+ALTER TABLE "property_fields" ADD COLUMN IF NOT EXISTS "label" TEXT;

@@ -470,6 +470,8 @@ model CaseDocument {
   extractionStatus  String         @default("PENDING")
   pageCount         Int?
   notes             String?
+  classifiedType    String?
+  classificationConfidence Decimal? @db.Decimal(5, 4)
   // Legacy columns kept for rows created before this migration
   fileName          String?
   fileType          String?

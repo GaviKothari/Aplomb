@@ -2,43 +2,75 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   FIELD_PATTERNS,
   SINGLE_VALUE_FIELDS,
-  BOUNDARY_FIELDS,
 } from './patterns/field-patterns';
 import { normalizeText, normalizeDate, normalizePincode } from './patterns/normalizer';
+import { DocumentClassifier, ClassificationResult } from '../classification/document-classifier';
+import { getTemplate } from './templates';
+import { TemplateField } from './templates/types';
 
 export interface ExtractedField {
-  fieldKey: string;
-  fieldValue: string;
-  confidence: number;
-  sourcePage: number | null;
-  sourceLine: string | null;
+  fieldKey:        string;
+  fieldValue:      string;
+  confidence:      number;
+  sourcePage:      number | null;
+  sourceLine:      string | null;
   sourceDocumentId: string | null;
-  label: string;
+  label:           string;
 }
 
 export interface PageText {
   pageNumber: number;
-  text: string;
+  text:       string;
   documentId: string;
 }
+
+export interface ExtractionResult {
+  fields:         ExtractedField[];
+  classification: ClassificationResult;
+}
+
+const classifier = new DocumentClassifier();
 
 @Injectable()
 export class ExtractionService {
   private readonly logger = new Logger(ExtractionService.name);
 
+  // Main entry point — returns fields and classification in one call
   extractFromPages(pages: PageText[]): ExtractedField[] {
-    const allText = pages.map(p => p.text).join('\n\n---PAGE---\n\n');
-    const normalized = normalizeText(allText);
+    return this.extractWithClassification(pages).fields;
+  }
+
+  extractWithClassification(pages: PageText[]): ExtractionResult {
+    const fullText  = pages.map(p => p.text).join('\n\n---PAGE---\n\n');
+    const normalized = normalizeText(fullText);
+
+    // Step 1: Classify the document
+    const classification = classifier.classify(normalized);
+    this.logger.log(
+      `[EXTRACT] Classified as ${classification.documentType} (confidence: ${classification.confidence}) ` +
+      `— matched: [${classification.matchedKeywords.slice(0, 5).join(', ')}]`,
+    );
 
     const results = new Map<string, ExtractedField>();
 
+    // Step 2: Apply per-type template if available
+    const template = getTemplate(classification.documentType);
+    if (template) {
+      this.logger.log(`[EXTRACT] Using template: ${template.label}`);
+      const templateFields = this.extractWithTemplate(pages, normalized, template.fields, classification.confidence);
+      for (const f of templateFields) {
+        results.set(f.fieldKey, f);
+      }
+    }
+
+    // Step 3: Apply generic patterns as supplement/fallback
+    // Template fields take precedence — only overwrite with generic if higher confidence
     for (const pattern of FIELD_PATTERNS) {
       for (const pageInfo of pages) {
         const pageText = normalizeText(pageInfo.text);
-        const matches = this.runPatterns(pattern, pageText, pageInfo, normalized);
+        const matches  = this.runGenericPattern(pattern, pageText, pageInfo, normalized);
         for (const match of matches) {
           const existing = results.get(match.fieldKey);
-          // For single-value fields, keep highest confidence
           if (!existing || match.confidence > existing.confidence) {
             results.set(match.fieldKey, match);
           }
@@ -46,25 +78,80 @@ export class ExtractionService {
       }
     }
 
-    // Post-process: normalize specific fields
-    const fields = Array.from(results.values());
-    return this.postProcess(fields);
+    const fields = this.postProcess(Array.from(results.values()));
+
+    if (template && fields.length === 0) {
+      this.logger.warn(`[EXTRACT] Template matched but 0 fields extracted for ${classification.documentType}`);
+    } else {
+      this.logger.log(`[EXTRACT] Extracted ${fields.length} fields total`);
+    }
+
+    return { fields, classification };
   }
 
-  private runPatterns(
+  // ── Template-based extraction ─────────────────────────────────────────────
+
+  private extractWithTemplate(
+    pages:         PageText[],
+    fullNormalized: string,
+    templateFields: TemplateField[],
+    classConfidence: number,
+  ): ExtractedField[] {
+    const results = new Map<string, ExtractedField>();
+
+    for (const tf of templateFields) {
+      for (const pageInfo of pages) {
+        const pageText = normalizeText(pageInfo.text);
+
+        for (const regex of tf.patterns) {
+          regex.lastIndex = 0;
+          const match = pageText.match(regex) ?? fullNormalized.match(regex);
+          if (!match) continue;
+
+          const raw = (match[1] ?? match[0])?.trim();
+          if (!raw || raw.length < 1) continue;
+
+          const value = tf.transform ? tf.transform(raw) : raw;
+          if (!value || value.length < 1) continue;
+
+          // Template match gets a bonus from classification confidence
+          const boost = (tf.boost ?? 0) + (tf.important ? 0.05 : 0) + (classConfidence * 0.1);
+          const confidence = Math.min(0.92, 0.72 + boost);
+
+          const existing = results.get(tf.fieldKey);
+          if (!existing || confidence > existing.confidence) {
+            results.set(tf.fieldKey, {
+              fieldKey:         tf.fieldKey,
+              fieldValue:       value.slice(0, 500),
+              confidence,
+              sourcePage:       pageInfo.pageNumber,
+              sourceLine:       this.extractSourceLine(pageText, match.index ?? 0).slice(0, 200),
+              sourceDocumentId: pageInfo.documentId,
+              label:            tf.label,
+            });
+          }
+          break; // first matching pattern wins per field
+        }
+      }
+    }
+
+    return Array.from(results.values());
+  }
+
+  // ── Generic pattern runner (existing logic) ───────────────────────────────
+
+  private runGenericPattern(
     pattern: { field: string; label: string; patterns: RegExp[]; confidence: number; extractor?: (m: RegExpMatchArray, full: string) => string | null },
-    text: string,
-    page: PageText,
+    text:    string,
+    page:    PageText,
     fullText: string,
   ): ExtractedField[] {
     const found: ExtractedField[] = [];
 
     for (const regex of pattern.patterns) {
-      // Reset lastIndex for global regexes
       regex.lastIndex = 0;
       let match: RegExpMatchArray | null;
 
-      // Use exec for global flag to get all matches
       if (regex.flags.includes('g')) {
         while ((match = regex.exec(text)) !== null) {
           const value = pattern.extractor
@@ -73,19 +160,16 @@ export class ExtractionService {
 
           if (!value || value.trim().length === 0) continue;
 
-          const sourceLine = this.extractSourceLine(text, match.index ?? 0);
-
           found.push({
-            fieldKey: pattern.field,
-            fieldValue: value,
-            confidence: this.adjustConfidence(pattern.confidence, value, pattern.field),
-            sourcePage: page.pageNumber,
-            sourceLine: sourceLine.slice(0, 200),
+            fieldKey:         pattern.field,
+            fieldValue:       value,
+            confidence:       this.adjustConfidence(pattern.confidence, value, pattern.field),
+            sourcePage:       page.pageNumber,
+            sourceLine:       this.extractSourceLine(text, match.index ?? 0).slice(0, 200),
             sourceDocumentId: page.documentId,
-            label: pattern.label,
+            label:            pattern.label,
           });
 
-          // For single-value fields, stop after first match
           if (SINGLE_VALUE_FIELDS.has(pattern.field)) break;
         }
       } else {
@@ -97,13 +181,13 @@ export class ExtractionService {
 
           if (value && value.trim().length > 0) {
             found.push({
-              fieldKey: pattern.field,
-              fieldValue: value,
-              confidence: this.adjustConfidence(pattern.confidence, value, pattern.field),
-              sourcePage: page.pageNumber,
-              sourceLine: this.extractSourceLine(text, match.index ?? 0).slice(0, 200),
+              fieldKey:         pattern.field,
+              fieldValue:       value,
+              confidence:       this.adjustConfidence(pattern.confidence, value, pattern.field),
+              sourcePage:       page.pageNumber,
+              sourceLine:       this.extractSourceLine(text, match.index ?? 0).slice(0, 200),
               sourceDocumentId: page.documentId,
-              label: pattern.label,
+              label:            pattern.label,
             });
           }
         }
@@ -115,25 +199,51 @@ export class ExtractionService {
     return found;
   }
 
+  // ── Post-processing ───────────────────────────────────────────────────────
+
   private postProcess(fields: ExtractedField[]): ExtractedField[] {
     return fields.map(f => {
       switch (f.fieldKey) {
         case 'pincode':
           return { ...f, fieldValue: normalizePincode(f.fieldValue) };
         case 'registrationDate':
+        case 'valuationDate':
+        case 'paymentDate':
+        case 'mutationDate':
+        case 'agreementDate':
+        case 'sanctionDate':
           return { ...f, fieldValue: normalizeDate(f.fieldValue) ?? f.fieldValue };
         case 'ownerName':
+        case 'vendorName':
+        case 'purchaserName':
+        case 'sellerName':
+        case 'buyerName':
         case 'coOwnerName':
           return { ...f, fieldValue: this.cleanName(f.fieldValue) };
         case 'totalArea':
+        case 'landArea':
+        case 'plotArea':
+        case 'plinthArea':
         case 'builtUpArea':
         case 'superArea':
         case 'carpetArea':
           return { ...f, fieldValue: this.normalizeAreaValue(f.fieldValue) };
+        case 'saleAmount':
+        case 'totalSalePrice':
+        case 'tokenAmount':
+        case 'balanceAmount':
+        case 'marketValue':
+        case 'distressValue':
+        case 'loanAmount':
+        case 'taxAmount':
+        case 'annualValue':
+        case 'landValue':
+        case 'buildingValue':
+          return { ...f, fieldValue: f.fieldValue.replace(/[,\s]/g, '') };
         default:
           return f;
       }
-    }).filter(f => f.fieldValue && f.fieldValue.length > 0);
+    }).filter(f => f.fieldValue && f.fieldValue.trim().length > 0);
   }
 
   private cleanName(name: string): string {
@@ -158,12 +268,9 @@ export class ExtractionService {
 
   private adjustConfidence(base: number, value: string, field: string): number {
     let conf = base;
-    // Short values are less reliable
     if (value.length < 3) conf -= 0.10;
-    // Pincode must be exactly 6 digits
     if (field === 'pincode' && !/^\d{6}$/.test(value.replace(/\D/g, ''))) conf -= 0.20;
-    // Names shouldn't be all caps or all lower
-    if (['ownerName', 'coOwnerName'].includes(field)) {
+    if (['ownerName', 'coOwnerName', 'vendorName', 'purchaserName'].includes(field)) {
       if (value === value.toUpperCase()) conf -= 0.05;
     }
     return Math.max(0.1, Math.min(1.0, conf));
@@ -175,7 +282,6 @@ export class ExtractionService {
     return text.slice(start, end === -1 ? text.length : end).trim();
   }
 
-  /** Merge multiple extraction results, preferring higher confidence when duplicate keys */
   mergeResults(a: ExtractedField[], b: ExtractedField[]): ExtractedField[] {
     const merged = new Map<string, ExtractedField>();
     for (const f of [...a, ...b]) {
@@ -187,9 +293,7 @@ export class ExtractionService {
 
   buildMasterJson(fields: ExtractedField[]): Record<string, string | null> {
     const obj: Record<string, string | null> = {};
-    for (const f of fields) {
-      obj[f.fieldKey] = f.fieldValue;
-    }
+    for (const f of fields) obj[f.fieldKey] = f.fieldValue;
     return obj;
   }
 }
