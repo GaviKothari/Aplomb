@@ -128,31 +128,37 @@ export class DocumentsService {
         });
       }
 
+      const skipped = ocrResult.engine.startsWith('skipped');
+
       await db.caseDocument.update({
         where: { id: documentId },
         data:  {
-          ocrStatus:        'DONE',
-          extractionStatus: 'PROCESSING',
-          pageCount:        ocrResult.pages.length,
+          ocrStatus:        skipped ? 'SKIPPED' : 'DONE',
+          extractionStatus: skipped ? 'SKIPPED' : 'PROCESSING',
+          pageCount:        ocrResult.pages.length || null,
         },
       });
 
-      const pageTexts = ocrResult.pages.map(p => ({
-        pageNumber: p.pageNumber,
-        text:       p.text,
-        documentId,
-      }));
-      const extracted = this.extraction.extractFromPages(pageTexts);
-      await this.upsertPropertyMaster(caseId, documentId, extracted);
+      if (!skipped) {
+        const pageTexts = ocrResult.pages.map(p => ({
+          pageNumber: p.pageNumber,
+          text:       p.text,
+          documentId,
+        }));
+        const extracted = this.extraction.extractFromPages(pageTexts);
+        await this.upsertPropertyMaster(caseId, documentId, extracted);
 
-      await db.caseDocument.update({
-        where: { id: documentId },
-        data:  { extractionStatus: 'DONE' },
-      });
+        await db.caseDocument.update({
+          where: { id: documentId },
+          data:  { extractionStatus: 'DONE' },
+        });
 
-      this.logger.log(
-        `[DOCS] Inline processed ${documentId} — ${extracted.length} fields, engine: ${ocrResult.engine}`,
-      );
+        this.logger.log(
+          `[DOCS] Inline processed ${documentId} — ${extracted.length} fields, engine: ${ocrResult.engine}`,
+        );
+      } else {
+        this.logger.log(`[DOCS] ${documentId} skipped OCR (${ocrResult.engine}) — use Reprocess for Tesseract`);
+      }
     } catch (e: any) {
       this.logger.error(`[DOCS] Inline processing error for ${documentId}: ${e.message}`);
       await db.caseDocument.update({

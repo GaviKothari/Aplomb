@@ -112,7 +112,7 @@ export class OcrService implements OnModuleInit, OnModuleDestroy {
     const hasUsableText = nativePages.some(t => t.replace(/\s/g, '').length > 50);
 
     if (hasUsableText) {
-      this.logger.log(`[OCR] ${documentId}: native text extraction (${nativePages.length} pages)`);
+      this.logger.log(`[OCR] ${documentId}: native PDF text (${nativePages.length} pages)`);
       const pages: OcrPageResult[] = nativePages.map((text, i) => ({
         pageNumber: i + 1,
         text,
@@ -122,31 +122,20 @@ export class OcrService implements OnModuleInit, OnModuleDestroy {
       return { pages, totalText: nativePages.join('\n\n'), engine: 'pdf-parse' };
     }
 
-    this.logger.log(`[OCR] ${documentId}: scanned PDF — falling back to image OCR`);
-    return this.processScannedPdf(buffer);
+    // Scanned PDF — Tesseract is too slow for inline processing.
+    // Return empty so the caller marks extractionStatus SKIPPED.
+    // Use the Reprocess button once a background queue (Redis) is available.
+    this.logger.warn(`[OCR] ${documentId}: scanned PDF detected — skipping inline OCR`);
+    return this.emptyResult('skipped-scanned');
   }
 
-  private async processScannedPdf(buffer: Buffer): Promise<OcrDocumentResult> {
-    // OCR the raw PDF buffer directly — Tesseract handles single-page scanned PDFs.
-    // For multi-page scanned PDFs this produces one merged text block (good enough for field extraction).
-    const text = await this.adapter.extractText(buffer);
-    const page: OcrPageResult = {
-      pageNumber: 1,
-      text,
-      wordCount: text.split(/\s+/).filter(Boolean).length,
-      engine: this.adapter.engineName,
-    };
-    return { pages: [page], totalText: text, engine: this.adapter.engineName };
+  private async processImage(_buffer: Buffer, documentId: string): Promise<OcrDocumentResult> {
+    // Images require Tesseract which is too slow for inline processing.
+    this.logger.warn(`[OCR] ${documentId}: image upload — skipping inline OCR`);
+    return this.emptyResult('skipped-image');
   }
 
-  private async processImage(buffer: Buffer, _documentId: string): Promise<OcrDocumentResult> {
-    const text = await this.adapter.extractText(buffer);
-    const page: OcrPageResult = {
-      pageNumber: 1,
-      text,
-      wordCount: text.split(/\s+/).filter(Boolean).length,
-      engine: this.adapter.engineName,
-    };
-    return { pages: [page], totalText: text, engine: this.adapter.engineName };
+  private emptyResult(engine: string): OcrDocumentResult {
+    return { pages: [], totalText: '', engine };
   }
 }

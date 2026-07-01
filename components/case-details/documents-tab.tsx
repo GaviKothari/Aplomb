@@ -18,7 +18,7 @@ import {
   useReprocessDocument, useUpdateDocumentShare, useDocumentSignedUrl,
 } from '@/lib/api/hooks'
 import {
-  FileText, Upload, Trash2, RotateCcw, Download, Eye,
+  FileText, Upload, Trash2, RotateCcw, Download,
   Clock, CheckCircle2, XCircle, Loader2, Share2, FileWarning,
 } from 'lucide-react'
 
@@ -40,21 +40,24 @@ const DOCUMENT_TYPES = [
 
 function ocrStatusMeta(status: string) {
   switch (status) {
-    case 'PENDING':    return { label: 'Queued',     color: 'bg-gray-100 text-gray-600',    icon: <Clock className="w-3 h-3" /> }
-    case 'PROCESSING': return { label: 'Processing', color: 'bg-blue-100 text-blue-700',   icon: <Loader2 className="w-3 h-3 animate-spin" /> }
-    case 'DONE':       return { label: 'OCR Done',   color: 'bg-green-100 text-green-700', icon: <CheckCircle2 className="w-3 h-3" /> }
-    case 'FAILED':     return { label: 'OCR Failed', color: 'bg-red-100 text-red-700',     icon: <XCircle className="w-3 h-3" /> }
-    default:           return { label: status ?? '—', color: 'bg-gray-100 text-gray-500',  icon: null }
+    case 'PENDING':    return { label: 'Queued',      color: 'bg-gray-100 text-gray-600',    icon: <Clock className="w-3 h-3" /> }
+    case 'PROCESSING': return { label: 'Processing',  color: 'bg-blue-100 text-blue-700',    icon: <Loader2 className="w-3 h-3 animate-spin" /> }
+    case 'DONE':       return { label: 'OCR Done',    color: 'bg-green-100 text-green-700',  icon: <CheckCircle2 className="w-3 h-3" /> }
+    case 'SKIPPED':    return { label: 'Text Ready',  color: 'bg-purple-100 text-purple-700',icon: <CheckCircle2 className="w-3 h-3" /> }
+    case 'FAILED':     return { label: 'OCR Failed',  color: 'bg-red-100 text-red-700',      icon: <XCircle className="w-3 h-3" /> }
+    default:           return { label: status ?? '—', color: 'bg-gray-100 text-gray-500',    icon: null }
   }
 }
 
 function extractionStatusMeta(status: string) {
   switch (status) {
-    case 'PENDING':    return { label: 'Not extracted', color: 'bg-gray-100 text-gray-500' }
-    case 'DONE':       return { label: 'Extracted',     color: 'bg-emerald-100 text-emerald-700' }
-    case 'PARTIAL':    return { label: 'Partial',       color: 'bg-amber-100 text-amber-700' }
-    case 'FAILED':     return { label: 'Extract failed',color: 'bg-red-100 text-red-700' }
-    default:           return { label: '—',             color: 'bg-gray-100 text-gray-400' }
+    case 'PENDING':    return { label: 'Not extracted',  color: 'bg-gray-100 text-gray-500' }
+    case 'PROCESSING': return { label: 'Extracting…',   color: 'bg-blue-100 text-blue-700' }
+    case 'DONE':       return { label: 'Extracted',      color: 'bg-emerald-100 text-emerald-700' }
+    case 'SKIPPED':    return { label: 'Scanned — manual', color: 'bg-amber-100 text-amber-700' }
+    case 'PARTIAL':    return { label: 'Partial',         color: 'bg-amber-100 text-amber-700' }
+    case 'FAILED':     return { label: 'Extract failed',  color: 'bg-red-100 text-red-700' }
+    default:           return { label: '—',               color: 'bg-gray-100 text-gray-400' }
   }
 }
 
