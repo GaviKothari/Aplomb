@@ -1,4 +1,11 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import * as os from 'os';
+
+const execAsync = promisify(exec);
 
 export interface OcrPageResult {
   pageNumber: number;
@@ -13,18 +20,96 @@ export interface OcrDocumentResult {
   engine: string;
 }
 
-// ── Abstract adapter — swap engines without touching callers ──────────────────
+// ── Abstract adapter ──────────────────────────────────────────────────────────
 
 export abstract class OcrAdapter {
-  abstract extractText(imageBuffer: Buffer, language?: string): Promise<string>;
+  abstract extractText(imageBuffer: Buffer, mimeType: string): Promise<string>;
   abstract readonly engineName: string;
 }
 
-// ── Tesseract.js adapter — singleton worker, created once and reused ──────────
+// ── System Tesseract binary adapter (fast — native C++, models pre-installed) ──
 
-export class TesseractAdapter extends OcrAdapter {
+export class SystemTesseractAdapter extends OcrAdapter {
+  readonly engineName = 'tesseract-system';
+  private readonly logger = new Logger(SystemTesseractAdapter.name);
+
+  static async isAvailable(): Promise<boolean> {
+    try {
+      await execAsync('tesseract --version', { timeout: 5_000 });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async extractText(buffer: Buffer, mimeType: string): Promise<string> {
+    const tmpId   = `ocr-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const tmpDir  = os.tmpdir();
+    const ext     = mimeType === 'application/pdf' ? 'pdf' : 'png';
+    const inFile  = path.join(tmpDir, `${tmpId}.${ext}`);
+    const outBase = path.join(tmpDir, `${tmpId}-out`);
+
+    try {
+      await fs.writeFile(inFile, buffer);
+
+      if (mimeType === 'application/pdf') {
+        // Convert PDF pages to PNGs with pdftoppm, then OCR each
+        const pngBase = path.join(tmpDir, tmpId);
+        try {
+          await execAsync(`pdftoppm -r 200 -png "${inFile}" "${pngBase}"`, { timeout: 30_000 });
+        } catch {
+          // pdftoppm failed — try passing PDF directly to tesseract
+          await execAsync(`tesseract "${inFile}" "${outBase}" -l hin+eng txt`, { timeout: 60_000 });
+          return this.readOutput(`${outBase}.txt`);
+        }
+
+        // Find all generated page PNGs and OCR each
+        const dir   = await fs.readdir(tmpDir);
+        const pages = dir
+          .filter(f => f.startsWith(path.basename(pngBase)) && f.endsWith('.png'))
+          .sort();
+
+        const texts: string[] = [];
+        for (const pg of pages) {
+          const pgPath    = path.join(tmpDir, pg);
+          const pgOutBase = path.join(tmpDir, `${tmpId}-pg-${pg}`);
+          try {
+            await execAsync(`tesseract "${pgPath}" "${pgOutBase}" -l hin+eng txt`, { timeout: 60_000 });
+            texts.push(await this.readOutput(`${pgOutBase}.txt`));
+          } finally {
+            await fs.unlink(pgPath).catch(() => null);
+            await fs.unlink(`${pgOutBase}.txt`).catch(() => null);
+          }
+        }
+        return texts.join('\n\n');
+      } else {
+        // Image — pass directly
+        await execAsync(`tesseract "${inFile}" "${outBase}" -l hin+eng txt`, { timeout: 60_000 });
+        return this.readOutput(`${outBase}.txt`);
+      }
+    } catch (e: any) {
+      this.logger.warn(`System Tesseract failed: ${e.message}`);
+      return '';
+    } finally {
+      await fs.unlink(inFile).catch(() => null);
+      await fs.unlink(`${outBase}.txt`).catch(() => null);
+    }
+  }
+
+  private async readOutput(filePath: string): Promise<string> {
+    try {
+      return await fs.readFile(filePath, 'utf8');
+    } catch {
+      return '';
+    }
+  }
+}
+
+// ── Tesseract.js adapter (fallback when system binary not installed) ───────────
+
+export class TesseractJsAdapter extends OcrAdapter {
   readonly engineName = 'tesseract.js';
-  private readonly logger = new Logger(TesseractAdapter.name);
+  private readonly logger = new Logger(TesseractJsAdapter.name);
   private workerPromise: Promise<any> | null = null;
 
   getWorker(): Promise<any> {
@@ -33,7 +118,7 @@ export class TesseractAdapter extends OcrAdapter {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const Tesseract = require('tesseract.js') as any;
         this.workerPromise = Tesseract.createWorker('hin+eng').catch((e: any) => {
-          this.logger.warn(`Tesseract worker init failed: ${e.message}`);
+          this.logger.warn(`Tesseract.js worker init failed: ${e.message}`);
           this.workerPromise = null;
           return null;
         });
@@ -45,15 +130,15 @@ export class TesseractAdapter extends OcrAdapter {
     return this.workerPromise!;
   }
 
-  async extractText(imageBuffer: Buffer): Promise<string> {
+  async extractText(buffer: Buffer): Promise<string> {
     try {
       const worker = await this.getWorker();
       if (!worker) return '';
-      const { data } = await worker.recognize(imageBuffer);
+      const { data } = await worker.recognize(buffer);
       return data.text ?? '';
     } catch (e: any) {
-      this.logger.warn(`Tesseract OCR failed: ${e.message}`);
-      this.workerPromise = null; // reset so next call retries
+      this.logger.warn(`Tesseract.js OCR failed: ${e.message}`);
+      this.workerPromise = null;
       return '';
     }
   }
@@ -67,7 +152,7 @@ export class TesseractAdapter extends OcrAdapter {
   }
 }
 
-// ── PDF text extraction (for native/digital PDFs, no OCR needed) ─────────────
+// ── PDF text extraction (digital PDFs — no OCR needed) ───────────────────────
 
 async function extractNativePdfText(buffer: Buffer): Promise<string[]> {
   try {
@@ -88,21 +173,28 @@ async function extractNativePdfText(buffer: Buffer): Promise<string[]> {
 @Injectable()
 export class OcrService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(OcrService.name);
-  private readonly adapter = new TesseractAdapter();
+  private adapter: OcrAdapter = new TesseractJsAdapter();
 
-  onModuleInit() {
-    // Pre-warm in background — never block startup if Tesseract fails to load.
-    try {
-      this.adapter.getWorker()
-        .then(() => this.logger.log('[OCR] Tesseract worker pre-warmed'))
-        .catch(() => null);
-    } catch {
-      // non-fatal — Tesseract will be retried on first actual use
+  async onModuleInit() {
+    // Prefer system Tesseract binary — much faster, zero download latency
+    const sysAvailable = await SystemTesseractAdapter.isAvailable();
+    if (sysAvailable) {
+      this.adapter = new SystemTesseractAdapter();
+      this.logger.log('[OCR] Using system Tesseract binary (hin+eng)');
+    } else {
+      this.logger.log('[OCR] System Tesseract not found — using tesseract.js (slower)');
+      try {
+        (this.adapter as TesseractJsAdapter).getWorker()
+          .then(() => this.logger.log('[OCR] Tesseract.js worker pre-warmed'))
+          .catch(() => null);
+      } catch { /* non-fatal */ }
     }
   }
 
   async onModuleDestroy() {
-    await (this.adapter as TesseractAdapter).terminate();
+    if (this.adapter instanceof TesseractJsAdapter) {
+      await this.adapter.terminate();
+    }
   }
 
   async processBuffer(
@@ -117,6 +209,7 @@ export class OcrService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async processPdf(buffer: Buffer, documentId: string): Promise<OcrDocumentResult> {
+    // Fast path: digital PDF — text is embedded, no OCR needed
     const nativePages = await extractNativePdfText(buffer);
     const hasUsableText = nativePages.some(t => t.replace(/\s/g, '').length > 50);
 
@@ -125,13 +218,13 @@ export class OcrService implements OnModuleInit, OnModuleDestroy {
       const pages: OcrPageResult[] = nativePages.map((text, i) => ({
         pageNumber: i + 1,
         text,
-        wordCount: text.split(/\s+/).filter(Boolean).length,
-        engine: 'pdf-parse',
+        wordCount:  text.split(/\s+/).filter(Boolean).length,
+        engine:     'pdf-parse',
       }));
       return { pages, totalText: nativePages.join('\n\n'), engine: 'pdf-parse' };
     }
 
-    // Scanned PDF — needs Tesseract, signal caller to run it in background
+    // Scanned PDF — needs OCR
     this.logger.log(`[OCR] ${documentId}: scanned PDF — queuing Tesseract background run`);
     return { pages: [], totalText: '', engine: 'needs-tesseract' };
   }
@@ -141,14 +234,14 @@ export class OcrService implements OnModuleInit, OnModuleDestroy {
     return { pages: [], totalText: '', engine: 'needs-tesseract' };
   }
 
-  /** Run Tesseract directly on a buffer — call this in a background task, not in the request path. */
-  async runTesseract(buffer: Buffer): Promise<OcrDocumentResult> {
-    const text = await this.adapter.extractText(buffer);
+  /** Run Tesseract directly — called from background tasks, not the request path. */
+  async runTesseract(buffer: Buffer, mimeType = 'application/pdf'): Promise<OcrDocumentResult> {
+    const text = await this.adapter.extractText(buffer, mimeType);
     const page: OcrPageResult = {
       pageNumber: 1,
       text,
-      wordCount: text.split(/\s+/).filter(Boolean).length,
-      engine: this.adapter.engineName,
+      wordCount:  text.split(/\s+/).filter(Boolean).length,
+      engine:     this.adapter.engineName,
     };
     return { pages: [page], totalText: text, engine: this.adapter.engineName };
   }

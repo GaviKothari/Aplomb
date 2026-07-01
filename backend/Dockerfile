@@ -23,7 +23,8 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-# openssl for Prisma; remaining packages are the minimal set @sparticuz/chromium needs on Debian Bookworm
+# openssl for Prisma; Chromium deps; tesseract-ocr + hin/eng models for OCR;
+# poppler-utils for pdftoppm (PDF→image before Tesseract)
 RUN apt-get update && apt-get install -y \
     openssl \
     libnss3 \
@@ -39,6 +40,10 @@ RUN apt-get update && apt-get install -y \
     libgbm1 \
     libpango-1.0-0 \
     libcairo2 \
+    tesseract-ocr \
+    tesseract-ocr-hin \
+    tesseract-ocr-eng \
+    poppler-utils \
     --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/node_modules ./node_modules
