@@ -279,9 +279,15 @@ export class DocumentsService {
     for (const f of allFields) {
       if (f.fieldValue) masterJson[f.fieldKey] = f.fieldValue;
     }
+
+    // Reset to DRAFT if new fields were found and record was already locked
+    const statusReset = newFields.length > 0 && (master.status === 'CONFIRMED' || master.status === 'REVIEWED')
+      ? { status: 'DRAFT' }
+      : {};
+
     await db.propertyMaster.update({
       where: { id: master.id },
-      data:  { masterJson, version: { increment: 1 } },
+      data:  { masterJson, version: { increment: 1 }, ...statusReset },
     });
   }
 
@@ -296,7 +302,7 @@ export class DocumentsService {
       where,
       orderBy: { createdAt: 'desc' },
       include: {
-        pages: { select: { pageNumber: true, ocrStatus: true, wordCount: true } },
+        pages: { select: { pageNumber: true, ocrStatus: true, wordCount: true, rawText: true } },
       },
     });
     return docs.map((d: any) => this.enrich(d));

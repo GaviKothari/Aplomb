@@ -12,7 +12,7 @@ import {
 } from '@/lib/api/hooks'
 import {
   Database, AlertTriangle, CheckCircle2, Edit3, Trash2,
-  Save, X, Plus, Loader2, Clock, History, ChevronDown, ChevronUp,
+  Save, X, Plus, Loader2, Clock, History, ChevronDown, ChevronUp, Unlock,
 } from 'lucide-react'
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; next: string | null; nextLabel: string | null }> = {
@@ -237,9 +237,20 @@ export function PropertyMasterTab({ caseId }: PropertyMasterTabProps) {
                 </Button>
               )}
               {locked && (
-                <div className="flex items-center gap-1.5 text-green-600 text-sm font-medium">
-                  <CheckCircle2 className="w-4 h-4" />
-                  Locked & Confirmed
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 text-green-600 text-sm font-medium">
+                    <CheckCircle2 className="w-4 h-4" />
+                    Locked & Confirmed
+                  </div>
+                  <Button
+                    size="sm" variant="outline"
+                    className="gap-1.5 text-xs h-7"
+                    onClick={() => updateStatus.mutate({ caseId, status: 'DRAFT' })}
+                    disabled={updateStatus.isPending}
+                  >
+                    <Unlock className="w-3 h-3" />
+                    Unlock to Edit
+                  </Button>
                 </div>
               )}
             </div>
@@ -270,10 +281,13 @@ export function PropertyMasterTab({ caseId }: PropertyMasterTabProps) {
                 </Badge>
               )}
             </CardTitle>
-            {!locked && (
+            {(!locked || fields.length === 0) && (
               <Button
                 variant="outline" size="sm" className="gap-1.5 h-7 text-xs"
-                onClick={() => setAddOpen(v => !v)}
+                onClick={() => {
+                  if (locked) updateStatus.mutate({ caseId, status: 'DRAFT' })
+                  setAddOpen(v => !v)
+                }}
               >
                 <Plus className="w-3 h-3" />
                 Add field
@@ -307,8 +321,12 @@ export function PropertyMasterTab({ caseId }: PropertyMasterTabProps) {
           )}
 
           {fields.length === 0 ? (
-            <div className="py-10 text-center">
+            <div className="py-10 text-center space-y-2">
               <p className="text-sm text-muted-foreground">No fields extracted yet</p>
+              <p className="text-xs text-muted-foreground/60">
+                OCR couldn't find property fields in the uploaded document.
+                {locked ? ' Click "Unlock to Edit" or "Add field" above to enter them manually.' : ' Use "Add field" above to enter them manually.'}
+              </p>
             </div>
           ) : (
             <div className="overflow-x-auto">

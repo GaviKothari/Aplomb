@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState, useCallback } from 'react'
+import React, { useRef, useState, useCallback } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -18,7 +18,7 @@ import {
   useReprocessDocument, useUpdateDocumentShare, useDocumentSignedUrl,
 } from '@/lib/api/hooks'
 import {
-  FileText, Upload, Trash2, RotateCcw, Download,
+  FileText, Upload, Trash2, RotateCcw, Download, FileSearch,
   Clock, CheckCircle2, XCircle, Loader2, Share2, FileWarning,
 } from 'lucide-react'
 
@@ -82,6 +82,8 @@ export function DocumentsTab({ caseId }: DocumentsTabProps) {
   const [dragging, setDragging]   = useState(false)
   const [docType, setDocType]     = useState('OTHER')
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+
+  const [expandedOcr, setExpandedOcr] = useState<string | null>(null)
 
   const { data: docsRaw, isLoading } = useCaseDocuments(caseId)
   const docs: any[]  = Array.isArray(docsRaw) ? docsRaw : (docsRaw?.data ?? [])
@@ -237,71 +239,97 @@ export function DocumentsTab({ caseId }: DocumentsTabProps) {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {docs.map((doc: any) => {
-                    const ocr  = ocrStatusMeta(doc.ocrStatus)
-                    const ext  = extractionStatusMeta(doc.extractionStatus)
-                    const type = DOCUMENT_TYPES.find(t => t.value === doc.documentType)
+                    const ocr         = ocrStatusMeta(doc.ocrStatus)
+                    const ext         = extractionStatusMeta(doc.extractionStatus)
+                    const type        = DOCUMENT_TYPES.find(t => t.value === doc.documentType)
+                    const rawText     = (doc.pages ?? []).map((p: any) => p.rawText).filter(Boolean).join('\n\n--- Page break ---\n\n')
+                    const ocrExpanded = expandedOcr === doc.id
+                    const hasText     = rawText.trim().length > 0
                     return (
-                      <tr key={doc.id} className="hover:bg-muted/30 transition-colors">
-                        <td className="py-3 pr-4">
-                          <div className="flex items-center gap-2">
-                            <FileText className="w-4 h-4 shrink-0 text-muted-foreground" />
-                            <span className="font-medium truncate max-w-[180px]" title={doc.fileName}>
-                              {doc.fileName ?? 'document'}
+                      <React.Fragment key={doc.id}>
+                        <tr className="hover:bg-muted/30 transition-colors">
+                          <td className="py-3 pr-4">
+                            <div className="flex items-center gap-2">
+                              <FileText className="w-4 h-4 shrink-0 text-muted-foreground" />
+                              <span className="font-medium truncate max-w-[180px]" title={doc.fileName}>
+                                {doc.fileName ?? 'document'}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3 pr-4">
+                            <span className="text-xs text-muted-foreground">
+                              {type?.label ?? doc.documentType ?? '—'}
                             </span>
-                          </div>
-                        </td>
-                        <td className="py-3 pr-4">
-                          <span className="text-xs text-muted-foreground">
-                            {type?.label ?? doc.documentType ?? '—'}
-                          </span>
-                        </td>
-                        <td className="py-3 pr-4">
-                          <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${ocr.color}`}>
-                            {ocr.icon}
-                            {ocr.label}
-                          </span>
-                        </td>
-                        <td className="py-3 pr-4">
-                          <span className={`inline-flex text-xs px-2 py-0.5 rounded-full font-medium ${ext.color}`}>
-                            {ext.label}
-                          </span>
-                        </td>
-                        <td className="py-3 pr-4 text-xs text-muted-foreground">
-                          {formatBytes(doc.fileSize)}
-                        </td>
-                        <td className="py-3 pr-4 text-xs text-muted-foreground">
-                          {formatDate(doc.createdAt)}
-                        </td>
-                        <td className="py-3 text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <Button
-                              variant="ghost" size="icon" className="h-7 w-7"
-                              title="Download"
-                              onClick={() => onDownload(doc.id, doc.fileName)}
-                              disabled={getUrl.isPending}
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                            </Button>
-                            {doc.ocrStatus === 'FAILED' && (
+                          </td>
+                          <td className="py-3 pr-4">
+                            <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${ocr.color}`}>
+                              {ocr.icon}
+                              {ocr.label}
+                            </span>
+                          </td>
+                          <td className="py-3 pr-4">
+                            <span className={`inline-flex text-xs px-2 py-0.5 rounded-full font-medium ${ext.color}`}>
+                              {ext.label}
+                            </span>
+                          </td>
+                          <td className="py-3 pr-4 text-xs text-muted-foreground">
+                            {formatBytes(doc.fileSize)}
+                          </td>
+                          <td className="py-3 pr-4 text-xs text-muted-foreground">
+                            {formatDate(doc.createdAt)}
+                          </td>
+                          <td className="py-3 text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              {hasText && (
+                                <Button
+                                  variant="ghost" size="icon" className={`h-7 w-7 ${ocrExpanded ? 'text-blue-600' : 'text-muted-foreground'}`}
+                                  title="View OCR text"
+                                  onClick={() => setExpandedOcr(ocrExpanded ? null : doc.id)}
+                                >
+                                  <FileSearch className="w-3.5 h-3.5" />
+                                </Button>
+                              )}
                               <Button
-                                variant="ghost" size="icon" className="h-7 w-7 text-amber-600"
-                                title="Retry OCR"
-                                onClick={() => reprocess.mutate({ caseId, docId: doc.id })}
-                                disabled={reprocess.isPending}
+                                variant="ghost" size="icon" className="h-7 w-7"
+                                title="Download"
+                                onClick={() => onDownload(doc.id, doc.fileName)}
+                                disabled={getUrl.isPending}
                               >
-                                <RotateCcw className="w-3.5 h-3.5" />
+                                <Download className="w-3.5 h-3.5" />
                               </Button>
-                            )}
-                            <Button
-                              variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:text-red-600"
-                              title="Delete"
-                              onClick={() => setDeleteTarget(doc.id)}
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
+                              {doc.ocrStatus === 'FAILED' && (
+                                <Button
+                                  variant="ghost" size="icon" className="h-7 w-7 text-amber-600"
+                                  title="Retry OCR"
+                                  onClick={() => reprocess.mutate({ caseId, docId: doc.id })}
+                                  disabled={reprocess.isPending}
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                </Button>
+                              )}
+                              <Button
+                                variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:text-red-600"
+                                title="Delete"
+                                onClick={() => setDeleteTarget(doc.id)}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                        {ocrExpanded && (
+                          <tr>
+                            <td colSpan={7} className="pb-3 pt-0 px-0">
+                              <div className="mx-2 rounded-lg border bg-muted/40 p-3">
+                                <p className="text-xs font-medium text-muted-foreground mb-2">OCR Text — {doc.pages?.length ?? 0} page(s)</p>
+                                <pre className="text-xs whitespace-pre-wrap font-mono leading-relaxed text-foreground/80 max-h-64 overflow-y-auto">
+                                  {rawText || 'No text extracted'}
+                                </pre>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     )
                   })}
                 </tbody>
