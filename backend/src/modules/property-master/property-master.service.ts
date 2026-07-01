@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { randomUUID } from 'crypto';
 
@@ -10,8 +10,6 @@ export interface FieldUpdateDto {
 
 @Injectable()
 export class PropertyMasterService {
-  private readonly logger = new Logger(PropertyMasterService.name);
-
   constructor(private readonly prisma: PrismaService) {}
 
   async getForCase(caseId: string) {
@@ -175,6 +173,7 @@ export class PropertyMasterService {
   private formatMaster(master: any) {
     const fields = (master.fields ?? []).map((f: any) => ({
       fieldKey:        f.fieldKey,
+      label:           f.label ?? null,
       fieldValue:      f.fieldValue,
       confidence:      Number(f.confidence),
       sourcePage:      f.sourcePage,

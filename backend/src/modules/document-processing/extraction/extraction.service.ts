@@ -4,9 +4,35 @@ import {
   SINGLE_VALUE_FIELDS,
 } from './patterns/field-patterns';
 import { normalizeText, normalizeDate, normalizePincode } from './patterns/normalizer';
-import { DocumentClassifier, ClassificationResult } from '../classification/document-classifier';
-import { getTemplate } from './templates';
+import { DocumentClassifier, ClassificationResult, KnownDocType } from '../classification/document-classifier';
+import { getTemplate, TEMPLATE_REGISTRY } from './templates';
 import { TemplateField } from './templates/types';
+
+// Maps user-facing upload types → KnownDocType for template fallback
+const UPLOAD_TYPE_TO_KNOWN: Record<string, KnownDocType> = {
+  SALE_DEED:               'SALE_DEED',
+  REGISTRY:                'REGISTRY',
+  REGISTRY_COPY:           'REGISTRY',
+  AGREEMENT_TO_SELL:       'AGREEMENT_TO_SELL',
+  PREVIOUS_VALUATION:      'PREVIOUS_VALUATION',
+  VALUATION_REPORT:        'PREVIOUS_VALUATION',
+  TAX_RECEIPT:             'TAX_RECEIPT',
+  PROPERTY_TAX_RECEIPT:    'TAX_RECEIPT',
+  MUTATION:                'MUTATION',
+  MUTATION_KHATAUNI:       'MUTATION',
+  BUILDING_PLAN:           'BUILDING_PLAN',
+  FLOOR_PLAN:              'BUILDING_PLAN',
+  LAYOUT_PLAN:             'BUILDING_PLAN',
+  APPROVED_PLAN:           'BUILDING_PLAN',
+  SANCTION_LETTER:         'SANCTION_LETTER',
+  ALLOTMENT_LETTER:        'ALLOTMENT_LETTER',
+  POSSESSION_LETTER:       'POSSESSION_LETTER',
+  POSSESSION_CERTIFICATE:  'POSSESSION_LETTER',
+  CHAIN_OF_TITLE:          'CHAIN_OF_TITLE',
+  ENCUMBRANCE_CERTIFICATE: 'CHAIN_OF_TITLE',
+  OCCUPANCY_CERTIFICATE:   'OCCUPANCY_CERTIFICATE',
+  COMPLETION_CERTIFICATE:  'OCCUPANCY_CERTIFICATE',
+};
 
 export interface ExtractedField {
   fieldKey:        string;
@@ -40,8 +66,8 @@ export class ExtractionService {
     return this.extractWithClassification(pages).fields;
   }
 
-  extractWithClassification(pages: PageText[]): ExtractionResult {
-    const fullText  = pages.map(p => p.text).join('\n\n---PAGE---\n\n');
+  extractWithClassification(pages: PageText[], hintDocType?: string): ExtractionResult {
+    const fullText   = pages.map(p => p.text).join('\n\n---PAGE---\n\n');
     const normalized = normalizeText(fullText);
 
     // Step 1: Classify the document
@@ -51,10 +77,20 @@ export class ExtractionService {
       `— matched: [${classification.matchedKeywords.slice(0, 5).join(', ')}]`,
     );
 
+    // If classifier is uncertain (OTHER or low confidence), fall back to the user's manually chosen type
+    let effectiveType: KnownDocType = classification.documentType;
+    if ((effectiveType === 'OTHER' || classification.confidence < 0.60) && hintDocType) {
+      const mapped = UPLOAD_TYPE_TO_KNOWN[hintDocType] ?? (hintDocType as KnownDocType);
+      if (TEMPLATE_REGISTRY[mapped]) {
+        effectiveType = mapped;
+        this.logger.log(`[EXTRACT] Classifier uncertain — using upload hint: ${hintDocType} → ${effectiveType}`);
+      }
+    }
+
     const results = new Map<string, ExtractedField>();
 
     // Step 2: Apply per-type template if available
-    const template = getTemplate(classification.documentType);
+    const template = getTemplate(effectiveType);
     if (template) {
       this.logger.log(`[EXTRACT] Using template: ${template.label}`);
       const templateFields = this.extractWithTemplate(pages, normalized, template.fields, classification.confidence);

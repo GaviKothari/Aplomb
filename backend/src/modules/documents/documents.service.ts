@@ -66,7 +66,7 @@ export class DocumentsService {
 
     // Start inline processing immediately — works even without Redis.
     // Fire-and-forget; the UI polls every 5s to see the updated status.
-    this.processInline(doc.id, caseId, file.buffer, file.mimetype).catch(err => {
+    this.processInline(doc.id, caseId, file.buffer, file.mimetype, doc.documentType).catch(err => {
       this.logger.error(`[DOCS] Inline processing failed for ${doc.id}: ${err.message}`);
     });
 
@@ -87,10 +87,11 @@ export class DocumentsService {
   // ── Inline processor (runs in-process, no Redis dependency) ─────────────────
 
   private async processInline(
-    documentId: string,
-    caseId:     string,
-    buffer:     Buffer,
-    mimeType:   string,
+    documentId:   string,
+    caseId:       string,
+    buffer:       Buffer,
+    mimeType:     string,
+    documentType?: string,
   ): Promise<void> {
     const db = this.prisma as any;
 
@@ -132,7 +133,7 @@ export class DocumentsService {
         // Scanned doc — status stays PROCESSING, Tesseract runs truly in background.
         // UI polls every 5s; background task updates DB when done.
         this.logger.log(`[DOCS] ${documentId}: starting Tesseract in background`);
-        this.runTesseractBackground(documentId, caseId, buffer);
+        this.runTesseractBackground(documentId, caseId, buffer, documentType);
         return;
       }
 
@@ -151,7 +152,7 @@ export class DocumentsService {
         text:       p.text,
         documentId,
       }));
-      const { fields: extracted, classification } = this.extraction.extractWithClassification(pageTexts);
+      const { fields: extracted, classification } = this.extraction.extractWithClassification(pageTexts, documentType);
       await this.upsertPropertyMaster(caseId, documentId, extracted);
 
       await db.caseDocument.update({
@@ -176,7 +177,7 @@ export class DocumentsService {
     }
   }
 
-  private runTesseractBackground(documentId: string, caseId: string, buffer: Buffer): void {
+  private runTesseractBackground(documentId: string, caseId: string, buffer: Buffer, documentType?: string): void {
     Promise.resolve().then(async () => {
       const db = this.prisma as any;
       try {
@@ -186,7 +187,7 @@ export class DocumentsService {
           await db.documentPage.upsert({
             where:  { documentId_pageNumber: { documentId, pageNumber: page.pageNumber } },
             create: {
-              id:         require('crypto').randomUUID(),
+              id:         randomUUID(),
               documentId,
               pageNumber: page.pageNumber,
               rawText:    page.text,
@@ -209,7 +210,7 @@ export class DocumentsService {
         });
 
         const pageTexts = ocrResult.pages.map(p => ({ pageNumber: p.pageNumber, text: p.text, documentId }));
-        const { fields: extracted, classification } = this.extraction.extractWithClassification(pageTexts);
+        const { fields: extracted, classification } = this.extraction.extractWithClassification(pageTexts, documentType);
         await this.upsertPropertyMaster(caseId, documentId, extracted);
 
         await db.caseDocument.update({
@@ -267,6 +268,7 @@ export class DocumentsService {
             id:               randomUUID(),
             propertyMasterId: master.id,
             fieldKey:         f.fieldKey,
+            label:            f.label,
             fieldValue:       f.fieldValue,
             confidence:       f.confidence,
             sourcePage:       f.sourcePage,
@@ -275,6 +277,7 @@ export class DocumentsService {
             isManualEdit:     false,
           },
           update: {
+            label:            f.label,
             fieldValue:       f.fieldValue,
             confidence:       f.confidence,
             sourcePage:       f.sourcePage,
@@ -358,7 +361,7 @@ export class DocumentsService {
     // Download buffer and reprocess inline (no Redis dependency)
     const buffer = await this.storage.downloadBuffer(doc.s3Key);
     if (buffer) {
-      this.processInline(documentId, caseId, buffer, doc.mimeType).catch(err => {
+      this.processInline(documentId, caseId, buffer, doc.mimeType, doc.documentType).catch(err => {
         this.logger.error(`[DOCS] Reprocess inline failed for ${documentId}: ${err.message}`);
       });
     }
