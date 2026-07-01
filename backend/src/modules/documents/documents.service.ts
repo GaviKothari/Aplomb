@@ -353,23 +353,33 @@ export class DocumentsService {
     const doc = await db.caseDocument.findUnique({ where: { id: documentId } });
     if (!doc) throw new NotFoundException('Document not found');
 
+    // Try to download the file BEFORE changing status.
+    // If the file is gone (e.g., ephemeral local storage after deployment), fail immediately
+    // so the queue doesn't pick it up and also fail, leaving the doc stuck as FAILED.
+    const buffer = await this.storage.downloadBuffer(doc.s3Key);
+    if (!buffer) {
+      await db.caseDocument.update({
+        where: { id: documentId },
+        data:  { ocrStatus: 'FAILED', extractionStatus: 'FAILED' },
+      });
+      this.logger.warn(`[DOCS] Reprocess failed — file not in storage: ${doc.s3Key}. Delete and re-upload.`);
+      return { queued: false, error: 'File not found in storage. Please delete and re-upload the document.' };
+    }
+
     await db.caseDocument.update({
       where: { id: documentId },
       data:  { ocrStatus: 'PENDING', extractionStatus: 'PENDING' },
     });
 
-    // Download buffer and reprocess inline (no Redis dependency)
-    const buffer = await this.storage.downloadBuffer(doc.s3Key);
-    if (buffer) {
-      this.processInline(documentId, caseId, buffer, doc.mimeType, doc.documentType).catch(err => {
-        this.logger.error(`[DOCS] Reprocess inline failed for ${documentId}: ${err.message}`);
-      });
-    }
+    // Inline processing — runs immediately without Redis
+    this.processInline(documentId, caseId, buffer, doc.mimeType, doc.documentType).catch(err => {
+      this.logger.error(`[DOCS] Reprocess inline failed for ${documentId}: ${err.message}`);
+    });
 
-    // Also try queue as secondary path
+    // Queue as secondary retry path — only added when file is confirmed downloadable
     this.queue.add(JOB_PROCESS_DOC, { documentId, caseId }, {
       attempts: 3,
-      backoff: { type: 'fixed', delay: 2000 },
+      backoff: { type: 'fixed', delay: 5000 },
     }).catch(() => null);
 
     return { queued: true };
