@@ -29,15 +29,20 @@ export class TesseractAdapter extends OcrAdapter {
 
   getWorker(): Promise<any> {
     if (!this.workerPromise) {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const Tesseract = require('tesseract.js') as any;
-      this.workerPromise = Tesseract.createWorker('hin+eng').catch((e: any) => {
-        this.logger.warn(`Tesseract worker init failed: ${e.message}`);
-        this.workerPromise = null; // allow retry next call
-        return null;
-      });
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const Tesseract = require('tesseract.js') as any;
+        this.workerPromise = Tesseract.createWorker('hin+eng').catch((e: any) => {
+          this.logger.warn(`Tesseract worker init failed: ${e.message}`);
+          this.workerPromise = null;
+          return null;
+        });
+      } catch (e: any) {
+        this.logger.warn(`tesseract.js failed to load: ${e.message}`);
+        return Promise.resolve(null);
+      }
     }
-    return this.workerPromise;
+    return this.workerPromise!;
   }
 
   async extractText(imageBuffer: Buffer): Promise<string> {
@@ -86,10 +91,14 @@ export class OcrService implements OnModuleInit, OnModuleDestroy {
   private readonly adapter = new TesseractAdapter();
 
   onModuleInit() {
-    // Pre-warm: kick off worker creation so first upload doesn't pay the init cost.
-    (this.adapter as TesseractAdapter).getWorker().then(() => {
-      this.logger.log('[OCR] Tesseract worker pre-warmed');
-    }).catch(() => null);
+    // Pre-warm in background — never block startup if Tesseract fails to load.
+    try {
+      this.adapter.getWorker()
+        .then(() => this.logger.log('[OCR] Tesseract worker pre-warmed'))
+        .catch(() => null);
+    } catch {
+      // non-fatal — Tesseract will be retried on first actual use
+    }
   }
 
   async onModuleDestroy() {
