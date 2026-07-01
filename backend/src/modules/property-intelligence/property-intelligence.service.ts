@@ -358,6 +358,56 @@ export class PropertyIntelligenceService {
     };
   }
 
+  // ── Address search (no caseId — used on the new-case form) ──────────────
+
+  async searchByAddress(address: string, pincode?: string): Promise<{
+    societyName: string | null;
+    count: number;
+    avgRate: number | null;
+    minRate: number | null;
+    maxRate: number | null;
+    records: PropertyMatch[];
+  }> {
+    const parsed = parseAddress(address);
+    const db = this.prisma as any;
+    let rows: any[] = [];
+
+    const societyToken = parsed.societyName?.split(' ')[0];
+    if (societyToken && societyToken.length > 3) {
+      rows = await db.propertyRecord.findMany({
+        where: { societyName: { contains: societyToken, mode: 'insensitive' } },
+        orderBy: { reportDate: 'desc' },
+        take: 20,
+      });
+    }
+
+    // Fallback / supplement with pincode when too few society hits
+    if (rows.length < 3 && pincode) {
+      const extra: any[] = await db.propertyRecord.findMany({
+        where: { pincode },
+        orderBy: { reportDate: 'desc' },
+        take: 20,
+      });
+      const seen = new Set(rows.map((r: any) => r.id));
+      for (const r of extra) {
+        if (!seen.has(r.id)) { rows.push(r); seen.add(r.id); }
+      }
+    }
+
+    const rates = rows
+      .map((r: any) => r.ratePerSqFt != null ? Number(r.ratePerSqFt) : null)
+      .filter((v): v is number => v !== null);
+
+    return {
+      societyName: parsed.societyName ?? null,
+      count:   rows.length,
+      avgRate: rates.length ? Math.round(rates.reduce((a, b) => a + b, 0) / rates.length) : null,
+      minRate: rates.length ? Math.round(Math.min(...rates)) : null,
+      maxRate: rates.length ? Math.round(Math.max(...rates)) : null,
+      records: rows.slice(0, 5).map(r => this.toMatch(r, 70)),
+    };
+  }
+
   private toMatch(r: any, confidence: number): PropertyMatch {
     return {
       id:                  r.id,

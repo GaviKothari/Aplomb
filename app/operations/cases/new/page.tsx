@@ -23,12 +23,14 @@ import {
   Building2,
   CheckCircle2,
   ChevronDown,
+  Database,
   Home,
   Loader2,
   MapPin,
   Navigation,
   Search,
   Shield,
+  TrendingUp,
   User,
   Users,
   Zap,
@@ -39,6 +41,7 @@ import {
   useBankBranches,
   useEmployees,
   useMatchDemolitionCase,
+  usePropertySearch,
   useApi,
 } from '@/lib/api/hooks'
 
@@ -389,6 +392,22 @@ export default function AddNewCasePage() {
   const hasDemolitionFlag = demolitionMatches.length > 0
   const highRiskCount = demolitionMatches.filter((m: any) => m.confidence === 'HIGH').length
   const hasTypedAddress = (form.propertyAddress?.trim().length ?? 0) >= 8
+
+  // ── Property knowledge base live search ──────────────────────────────
+  const [debouncedAddr, setDebouncedAddr] = useState('')
+  const [debouncedPin,  setDebouncedPin]  = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedAddr(form.propertyAddress?.trim() ?? '')
+      setDebouncedPin(form.propertyPincode?.trim() ?? '')
+    }, 700)
+    return () => clearTimeout(t)
+  }, [form.propertyAddress, form.propertyPincode])
+
+  const { data: piData, isLoading: piLoading } = usePropertySearch(
+    debouncedAddr,
+    debouncedPin || undefined,
+  )
 
   const { data: orgsData } = useOrganizations({ limit: 200 })
   const organizations: any[] = orgsData?.data ?? orgsData ?? []
@@ -934,6 +953,102 @@ export default function AddNewCasePage() {
 
           {/* ── Right: Sticky Sidebar ──────────────────────────────── */}
           <div className="space-y-4 lg:sticky lg:top-20 max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
+
+            {/* ── Property Knowledge Base ─────────────────────────── */}
+            <Card className={
+              !hasTypedAddress ? '' :
+              (piData as any)?.count > 0
+                ? 'border-blue-200 dark:border-blue-800'
+                : 'border-gray-200'
+            }>
+              <CardHeader className="pb-2 pt-4 px-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Database className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Property Knowledge Base
+                    </span>
+                  </div>
+                  {piLoading && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
+                </div>
+                {hasTypedAddress && !piLoading && (piData as any)?.societyName && (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    <span className="text-[10px] px-1.5 py-0.5 bg-muted rounded font-mono text-muted-foreground">
+                      {(piData as any).societyName}
+                    </span>
+                  </div>
+                )}
+              </CardHeader>
+              <CardContent className="px-4 pb-4">
+                {!hasTypedAddress && (
+                  <p className="text-xs text-muted-foreground text-center py-4">
+                    Start typing the property address — prior valuations appear here
+                  </p>
+                )}
+                {hasTypedAddress && piLoading && (
+                  <p className="text-xs text-muted-foreground text-center py-3">Searching knowledge base...</p>
+                )}
+                {hasTypedAddress && !piLoading && (piData as any)?.count === 0 && (
+                  <div className="flex items-center gap-2 py-3">
+                    <TrendingUp className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                    <p className="text-xs text-muted-foreground">No prior records for this address yet</p>
+                  </div>
+                )}
+                {hasTypedAddress && !piLoading && (piData as any)?.count > 0 && (() => {
+                  const pi = piData as any
+                  const fmt = (n: number | null) => n != null ? `₹${n.toLocaleString('en-IN')}` : '—'
+                  return (
+                    <div className="space-y-3">
+                      {/* Summary strip */}
+                      <div className="rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900 p-2.5 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-blue-800 dark:text-blue-300">
+                            {pi.count} prior valuation{pi.count > 1 ? 's' : ''} found
+                          </span>
+                          <TrendingUp className="w-3.5 h-3.5 text-blue-500" />
+                        </div>
+                        <div className="grid grid-cols-3 gap-1 text-[10px]">
+                          <div className="text-center">
+                            <div className="text-blue-900 dark:text-blue-100 font-bold">{fmt(pi.avgRate)}</div>
+                            <div className="text-blue-600 dark:text-blue-400">avg/sqft</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-blue-900 dark:text-blue-100 font-bold">{fmt(pi.minRate)}</div>
+                            <div className="text-blue-600 dark:text-blue-400">min/sqft</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-blue-900 dark:text-blue-100 font-bold">{fmt(pi.maxRate)}</div>
+                            <div className="text-blue-600 dark:text-blue-400">max/sqft</div>
+                          </div>
+                        </div>
+                      </div>
+                      {/* Recent records */}
+                      <div className="space-y-1.5">
+                        {pi.records.slice(0, 3).map((r: any) => (
+                          <div key={r.id} className="rounded-lg border border-border bg-muted/30 px-2.5 py-2 text-[10px] space-y-1">
+                            <p className="text-foreground font-medium leading-snug line-clamp-1">{r.rawAddress}</p>
+                            <div className="flex items-center gap-2 text-muted-foreground flex-wrap">
+                              {r.ratePerSqFt != null && (
+                                <span className="font-semibold text-foreground">₹{r.ratePerSqFt.toLocaleString('en-IN')}/sqft</span>
+                              )}
+                              {r.bankName && <span>· {r.bankName}</span>}
+                              {r.reportDate && (
+                                <span>· {new Date(r.reportDate).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                        {pi.count > 3 && (
+                          <p className="text-[10px] text-muted-foreground text-center">
+                            +{pi.count - 3} more in knowledge base
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })()}
+              </CardContent>
+            </Card>
 
             {/* ── Live MCD Search Panel ───────────────────────────── */}
             <Card className={

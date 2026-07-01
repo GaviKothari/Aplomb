@@ -72,6 +72,16 @@ export function useIndexPropertyIntelligence() {
   });
 }
 
+export function usePropertySearch(address: string, pincode?: string) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ['property-search', address, pincode],
+    queryFn:  () => api.propertyIntelligence.search(address, pincode),
+    enabled:  address.trim().length >= 8,
+    staleTime: 2 * 60_000,
+  });
+}
+
 export function useCaseHistory(id: string) {
   const api = useApi();
   return useQuery({

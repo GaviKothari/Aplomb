@@ -104,6 +104,12 @@ export function createApiClient(getToken: () => Promise<string | null>) {
       indexIntelligence: (caseId: string) => api<any>(`/cases/${caseId}/intelligence/index`, { method: 'POST' }),
     },
 
+    // Property Intelligence — address search (no caseId)
+    propertyIntelligence: {
+      search: (address: string, pincode?: string) =>
+        api<any>('/property-intelligence/search', { params: { address, ...(pincode ? { pincode } : {}) } }),
+    },
+
     // Organizations (banks)
     organizations: {
       list: (p?: any) => api<any>('/organizations', { params: p }),
