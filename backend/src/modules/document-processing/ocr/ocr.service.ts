@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 
 export interface OcrPageResult {
   pageNumber: number;
@@ -20,23 +20,44 @@ export abstract class OcrAdapter {
   abstract readonly engineName: string;
 }
 
-// ── Tesseract.js adapter (default — zero system deps) ─────────────────────────
+// ── Tesseract.js adapter — singleton worker, created once and reused ──────────
 
 export class TesseractAdapter extends OcrAdapter {
   readonly engineName = 'tesseract.js';
   private readonly logger = new Logger(TesseractAdapter.name);
+  private workerPromise: Promise<any> | null = null;
 
-  async extractText(imageBuffer: Buffer, language = 'hin+eng'): Promise<string> {
-    try {
+  getWorker(): Promise<any> {
+    if (!this.workerPromise) {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const Tesseract = require('tesseract.js') as any;
-      const worker = await Tesseract.createWorker(language);
+      this.workerPromise = Tesseract.createWorker('hin+eng').catch((e: any) => {
+        this.logger.warn(`Tesseract worker init failed: ${e.message}`);
+        this.workerPromise = null; // allow retry next call
+        return null;
+      });
+    }
+    return this.workerPromise;
+  }
+
+  async extractText(imageBuffer: Buffer): Promise<string> {
+    try {
+      const worker = await this.getWorker();
+      if (!worker) return '';
       const { data } = await worker.recognize(imageBuffer);
-      await worker.terminate();
       return data.text ?? '';
     } catch (e: any) {
       this.logger.warn(`Tesseract OCR failed: ${e.message}`);
+      this.workerPromise = null; // reset so next call retries
       return '';
+    }
+  }
+
+  async terminate(): Promise<void> {
+    if (this.workerPromise) {
+      const worker = await this.workerPromise.catch(() => null);
+      await worker?.terminate().catch(() => null);
+      this.workerPromise = null;
     }
   }
 }
@@ -60,9 +81,20 @@ async function extractNativePdfText(buffer: Buffer): Promise<string[]> {
 // ── Main OCR service ──────────────────────────────────────────────────────────
 
 @Injectable()
-export class OcrService {
+export class OcrService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(OcrService.name);
-  private readonly adapter: OcrAdapter = new TesseractAdapter();
+  private readonly adapter = new TesseractAdapter();
+
+  onModuleInit() {
+    // Pre-warm: kick off worker creation so first upload doesn't pay the init cost.
+    (this.adapter as TesseractAdapter).getWorker().then(() => {
+      this.logger.log('[OCR] Tesseract worker pre-warmed');
+    }).catch(() => null);
+  }
+
+  async onModuleDestroy() {
+    await (this.adapter as TesseractAdapter).terminate();
+  }
 
   async processBuffer(
     buffer: Buffer,

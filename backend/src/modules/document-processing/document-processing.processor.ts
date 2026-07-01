@@ -28,16 +28,21 @@ export class DocumentProcessingProcessor {
   @Process(JOB_PROCESS_DOC)
   async processDocument(job: Job<ProcessDocumentJob>): Promise<void> {
     const { documentId, caseId } = job.data;
-    this.logger.log(`[DOC] Processing document ${documentId}`);
-
     const db = this.prisma as any;
 
+    // Atomic claim — inline processor in DocumentsService may have already handled this
+    const claimed = await db.caseDocument.updateMany({
+      where: { id: documentId, ocrStatus: 'PENDING' },
+      data:  { ocrStatus: 'PROCESSING' },
+    });
+    if (claimed.count === 0) {
+      this.logger.log(`[DOC] ${documentId} already handled by inline processor — skipping`);
+      return;
+    }
+
+    this.logger.log(`[DOC] Queue processor handling ${documentId}`);
+
     try {
-      // 1 ── Mark document as processing
-      await db.caseDocument.update({
-        where: { id: documentId },
-        data:  { ocrStatus: 'PROCESSING' },
-      });
 
       // 2 ── Fetch document metadata
       const doc = await db.caseDocument.findUnique({ where: { id: documentId } });
