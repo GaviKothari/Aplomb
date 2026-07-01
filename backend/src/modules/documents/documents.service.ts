@@ -5,6 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/services/storage.service';
 import { OcrService } from '../document-processing/ocr/ocr.service';
 import { ExtractionService } from '../document-processing/extraction/extraction.service';
+import { PropertyFingerprintService } from '../property-master/property-fingerprint.service';
 import { DOCUMENT_QUEUE, JOB_PROCESS_DOC } from '../document-processing/document-processing.processor';
 import { randomUUID } from 'crypto';
 
@@ -23,12 +24,13 @@ export class DocumentsService {
   private readonly logger = new Logger(DocumentsService.name);
 
   constructor(
-    private readonly prisma:     PrismaService,
-    private readonly storage:    StorageService,
-    private readonly ocr:        OcrService,
-    private readonly extraction: ExtractionService,
+    private readonly prisma:       PrismaService,
+    private readonly storage:      StorageService,
+    private readonly ocr:          OcrService,
+    private readonly extraction:   ExtractionService,
+    private readonly fingerprints: PropertyFingerprintService,
     @InjectQueue(DOCUMENT_QUEUE)
-    private readonly queue:      Queue,
+    private readonly queue:        Queue,
   ) {}
 
   async upload(
@@ -154,6 +156,7 @@ export class DocumentsService {
       }));
       const { fields: extracted, classification } = this.extraction.extractWithClassification(pageTexts, documentType);
       await this.upsertPropertyMaster(caseId, documentId, extracted);
+      this.fingerprints.saveFingerprint(caseId, extracted, {}).catch(() => null);
 
       await db.caseDocument.update({
         where: { id: documentId },
@@ -164,10 +167,7 @@ export class DocumentsService {
         },
       });
 
-      this.logger.log(
-        `[DOCS] Inline processed ${documentId} — ${extracted.length} fields, engine: ${ocrResult.engine}, ` +
-        `classified: ${classification.documentType} (${Math.round(classification.confidence * 100)}%)`,
-      );
+      this.logger.log(`[DOCS] Inline processed ${documentId} — ${extracted.length} fields`);
     } catch (e: any) {
       this.logger.error(`[DOCS] Inline processing error for ${documentId}: ${e.message}`);
       await db.caseDocument.update({
@@ -212,6 +212,7 @@ export class DocumentsService {
         const pageTexts = ocrResult.pages.map(p => ({ pageNumber: p.pageNumber, text: p.text, documentId }));
         const { fields: extracted, classification } = this.extraction.extractWithClassification(pageTexts, documentType);
         await this.upsertPropertyMaster(caseId, documentId, extracted);
+        this.fingerprints.saveFingerprint(caseId, extracted, {}).catch(() => null);
 
         await db.caseDocument.update({
           where: { id: documentId },
@@ -222,10 +223,7 @@ export class DocumentsService {
           },
         });
 
-        this.logger.log(
-          `[DOCS] Tesseract done for ${documentId} — ${extracted.length} fields, ` +
-          `classified: ${classification.documentType} (${Math.round(classification.confidence * 100)}%)`,
-        );
+        this.logger.log(`[DOCS] Tesseract done for ${documentId} — ${extracted.length} fields`);
       } catch (e: any) {
         this.logger.error(`[DOCS] Tesseract background failed for ${documentId}: ${e.message}`);
         await db.caseDocument.update({

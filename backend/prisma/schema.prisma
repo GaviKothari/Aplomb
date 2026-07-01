@@ -1390,3 +1390,20 @@ model PropertyRecord {
   @@index([valuationYear, organizationId])
   @@map("property_records")
 }
+
+// ============================================================
+// PROPERTY FINGERPRINT (historical matching)
+// ============================================================
+
+model PropertyFingerprint {
+  id          String   @id @default(cuid())
+  fingerprint String   @unique
+  caseId      String
+  masterJson  Json
+  keyFields   Json     // the identifiers used to generate this fingerprint
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  @@index([fingerprint])
+  @@map("property_fingerprints")
+}

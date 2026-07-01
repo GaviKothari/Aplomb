@@ -69,19 +69,9 @@ export class SystemTesseractAdapter extends OcrAdapter {
           .filter(f => f.startsWith(path.basename(pngBase)) && f.endsWith('.png'))
           .sort();
 
-        const texts: string[] = [];
-        for (const pg of pages) {
-          const pgPath    = path.join(tmpDir, pg);
-          const pgOutBase = path.join(tmpDir, `${tmpId}-pg-${pg}`);
-          try {
-            await execAsync(`tesseract "${pgPath}" "${pgOutBase}" -l hin+eng txt`, { timeout: 60_000 });
-            texts.push(await this.readOutput(`${pgOutBase}.txt`));
-          } finally {
-            await fs.unlink(pgPath).catch(() => null);
-            await fs.unlink(`${pgOutBase}.txt`).catch(() => null);
-          }
-        }
-        return texts.join('\n\n');
+        // Process pages in parallel (max 3 concurrent Tesseract processes)
+        const pageTexts = await this.parallelOcr(tmpDir, tmpId, pages);
+        return pageTexts.join('\n\n');
       } else {
         // Image — pass directly
         await execAsync(`tesseract "${inFile}" "${outBase}" -l hin+eng txt`, { timeout: 60_000 });
@@ -94,6 +84,34 @@ export class SystemTesseractAdapter extends OcrAdapter {
       await fs.unlink(inFile).catch(() => null);
       await fs.unlink(`${outBase}.txt`).catch(() => null);
     }
+  }
+
+  private async parallelOcr(tmpDir: string, tmpId: string, pages: string[]): Promise<string[]> {
+    const CONCURRENCY = 3;
+    const results: string[] = new Array(pages.length).fill('');
+    const queue = pages.map((pg, i) => ({ pg, i }));
+
+    const runBatch = async () => {
+      while (queue.length > 0) {
+        const item = queue.shift();
+        if (!item) break;
+        const { pg, i } = item;
+        const pgPath    = path.join(tmpDir, pg);
+        const pgOutBase = path.join(tmpDir, `${tmpId}-pg-${i}`);
+        try {
+          await execAsync(`tesseract "${pgPath}" "${pgOutBase}" -l hin+eng txt`, { timeout: 60_000 });
+          results[i] = await this.readOutput(`${pgOutBase}.txt`);
+        } catch {
+          results[i] = '';
+        } finally {
+          await fs.unlink(pgPath).catch(() => null);
+          await fs.unlink(`${pgOutBase}.txt`).catch(() => null);
+        }
+      }
+    };
+
+    await Promise.all(Array.from({ length: CONCURRENCY }, runBatch));
+    return results;
   }
 
   private async readOutput(filePath: string): Promise<string> {
@@ -236,13 +254,18 @@ export class OcrService implements OnModuleInit, OnModuleDestroy {
 
   /** Run Tesseract directly — called from background tasks, not the request path. */
   async runTesseract(buffer: Buffer, mimeType = 'application/pdf'): Promise<OcrDocumentResult> {
-    const text = await this.adapter.extractText(buffer, mimeType);
-    const page: OcrPageResult = {
-      pageNumber: 1,
-      text,
-      wordCount:  text.split(/\s+/).filter(Boolean).length,
-      engine:     this.adapter.engineName,
-    };
-    return { pages: [page], totalText: text, engine: this.adapter.engineName };
+    // System adapter returns per-page text separated by \n\n
+    const joined = await this.adapter.extractText(buffer, mimeType);
+    const rawPages = joined.split(/\n{3,}/).filter(t => t.trim().length > 0);
+    const pages: OcrPageResult[] = rawPages.length > 0
+      ? rawPages.map((text, i) => ({
+          pageNumber: i + 1,
+          text:       text.trim(),
+          wordCount:  text.split(/\s+/).filter(Boolean).length,
+          engine:     this.adapter.engineName,
+        }))
+      : [{ pageNumber: 1, text: joined, wordCount: joined.split(/\s+/).filter(Boolean).length, engine: this.adapter.engineName }];
+
+    return { pages, totalText: joined, engine: this.adapter.engineName };
   }
 }

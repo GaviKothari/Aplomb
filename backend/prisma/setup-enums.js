@@ -280,6 +280,24 @@ async function main() {
     'column invitationSentAt',
   );
 
+  // Property fingerprints table (historical matching)
+  await exec(`
+    CREATE TABLE IF NOT EXISTS "property_fingerprints" (
+      "id"          TEXT NOT NULL,
+      "fingerprint" TEXT NOT NULL,
+      "caseId"      TEXT NOT NULL,
+      "masterJson"  JSONB NOT NULL DEFAULT '{}',
+      "keyFields"   JSONB NOT NULL DEFAULT '{}',
+      "createdAt"   TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt"   TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "property_fingerprints_pkey" PRIMARY KEY ("id")
+    )
+  `, 'CREATE TABLE property_fingerprints');
+  await exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS "property_fingerprints_fingerprint_key" ON "property_fingerprints"("fingerprint")`,
+    'unique index property_fingerprints.fingerprint',
+  );
+
   // Document intelligence classification columns
   await exec(
     `ALTER TABLE "case_documents" ADD COLUMN IF NOT EXISTS "classifiedType" TEXT`,
