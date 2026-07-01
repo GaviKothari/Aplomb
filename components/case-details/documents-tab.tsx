@@ -244,7 +244,7 @@ export function DocumentsTab({ caseId }: DocumentsTabProps) {
                     const type        = DOCUMENT_TYPES.find(t => t.value === doc.documentType)
                     const rawText     = (doc.pages ?? []).map((p: any) => p.rawText).filter(Boolean).join('\n\n--- Page break ---\n\n')
                     const ocrExpanded = expandedOcr === doc.id
-                    const hasText     = rawText.trim().length > 0
+                    const ocrDone     = doc.ocrStatus === 'DONE'
                     return (
                       <React.Fragment key={doc.id}>
                         <tr className="hover:bg-muted/30 transition-colors">
@@ -280,7 +280,7 @@ export function DocumentsTab({ caseId }: DocumentsTabProps) {
                           </td>
                           <td className="py-3 text-right">
                             <div className="flex items-center justify-end gap-1">
-                              {hasText && (
+                              {ocrDone && (
                                 <Button
                                   variant="ghost" size="icon" className={`h-7 w-7 ${ocrExpanded ? 'text-blue-600' : 'text-muted-foreground'}`}
                                   title="View OCR text"
@@ -290,6 +290,14 @@ export function DocumentsTab({ caseId }: DocumentsTabProps) {
                                 </Button>
                               )}
                               <Button
+                                variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-amber-600"
+                                title="Reprocess OCR"
+                                onClick={() => reprocess.mutate({ caseId, docId: doc.id })}
+                                disabled={reprocess.isPending}
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                              </Button>
+                              <Button
                                 variant="ghost" size="icon" className="h-7 w-7"
                                 title="Download"
                                 onClick={() => onDownload(doc.id, doc.fileName)}
@@ -297,16 +305,6 @@ export function DocumentsTab({ caseId }: DocumentsTabProps) {
                               >
                                 <Download className="w-3.5 h-3.5" />
                               </Button>
-                              {doc.ocrStatus === 'FAILED' && (
-                                <Button
-                                  variant="ghost" size="icon" className="h-7 w-7 text-amber-600"
-                                  title="Retry OCR"
-                                  onClick={() => reprocess.mutate({ caseId, docId: doc.id })}
-                                  disabled={reprocess.isPending}
-                                >
-                                  <RotateCcw className="w-3.5 h-3.5" />
-                                </Button>
-                              )}
                               <Button
                                 variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:text-red-600"
                                 title="Delete"
@@ -321,10 +319,19 @@ export function DocumentsTab({ caseId }: DocumentsTabProps) {
                           <tr>
                             <td colSpan={7} className="pb-3 pt-0 px-0">
                               <div className="mx-2 rounded-lg border bg-muted/40 p-3">
-                                <p className="text-xs font-medium text-muted-foreground mb-2">OCR Text — {doc.pages?.length ?? 0} page(s)</p>
-                                <pre className="text-xs whitespace-pre-wrap font-mono leading-relaxed text-foreground/80 max-h-64 overflow-y-auto">
-                                  {rawText || 'No text extracted'}
-                                </pre>
+                                <p className="text-xs font-medium text-muted-foreground mb-2">
+                                  OCR Text — {doc.pages?.length ?? 0} page(s) · engine: {doc.pages?.[0]?.ocrEngine ?? '—'}
+                                </p>
+                                {rawText.trim() ? (
+                                  <pre className="text-xs whitespace-pre-wrap font-mono leading-relaxed text-foreground/80 max-h-64 overflow-y-auto">
+                                    {rawText}
+                                  </pre>
+                                ) : (
+                                  <p className="text-xs text-muted-foreground/60 italic">
+                                    No text was extracted. The document may be a very low-quality scan, or the file
+                                    may have been processed before this feature was deployed — click Reprocess (↺) to try again.
+                                  </p>
+                                )}
                               </div>
                             </td>
                           </tr>
