@@ -122,20 +122,25 @@ export class OcrService implements OnModuleInit, OnModuleDestroy {
       return { pages, totalText: nativePages.join('\n\n'), engine: 'pdf-parse' };
     }
 
-    // Scanned PDF — Tesseract is too slow for inline processing.
-    // Return empty so the caller marks extractionStatus SKIPPED.
-    // Use the Reprocess button once a background queue (Redis) is available.
-    this.logger.warn(`[OCR] ${documentId}: scanned PDF detected — skipping inline OCR`);
-    return this.emptyResult('skipped-scanned');
+    // Scanned PDF — needs Tesseract, signal caller to run it in background
+    this.logger.log(`[OCR] ${documentId}: scanned PDF — queuing Tesseract background run`);
+    return { pages: [], totalText: '', engine: 'needs-tesseract' };
   }
 
   private async processImage(_buffer: Buffer, documentId: string): Promise<OcrDocumentResult> {
-    // Images require Tesseract which is too slow for inline processing.
-    this.logger.warn(`[OCR] ${documentId}: image upload — skipping inline OCR`);
-    return this.emptyResult('skipped-image');
+    this.logger.log(`[OCR] ${documentId}: image — queuing Tesseract background run`);
+    return { pages: [], totalText: '', engine: 'needs-tesseract' };
   }
 
-  private emptyResult(engine: string): OcrDocumentResult {
-    return { pages: [], totalText: '', engine };
+  /** Run Tesseract directly on a buffer — call this in a background task, not in the request path. */
+  async runTesseract(buffer: Buffer): Promise<OcrDocumentResult> {
+    const text = await this.adapter.extractText(buffer);
+    const page: OcrPageResult = {
+      pageNumber: 1,
+      text,
+      wordCount: text.split(/\s+/).filter(Boolean).length,
+      engine: this.adapter.engineName,
+    };
+    return { pages: [page], totalText: text, engine: this.adapter.engineName };
   }
 }

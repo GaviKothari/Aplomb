@@ -128,23 +128,82 @@ export class DocumentsService {
         });
       }
 
-      const skipped = ocrResult.engine.startsWith('skipped');
+      if (ocrResult.engine === 'needs-tesseract') {
+        // Scanned doc — status stays PROCESSING, Tesseract runs truly in background.
+        // UI polls every 5s; background task updates DB when done.
+        this.logger.log(`[DOCS] ${documentId}: starting Tesseract in background`);
+        this.runTesseractBackground(documentId, caseId, buffer);
+        return;
+      }
 
+      // Digital PDF — fast path complete
       await db.caseDocument.update({
         where: { id: documentId },
         data:  {
-          ocrStatus:        skipped ? 'SKIPPED' : 'DONE',
-          extractionStatus: skipped ? 'SKIPPED' : 'PROCESSING',
+          ocrStatus:        'DONE',
+          extractionStatus: 'PROCESSING',
           pageCount:        ocrResult.pages.length || null,
         },
       });
 
-      if (!skipped) {
-        const pageTexts = ocrResult.pages.map(p => ({
-          pageNumber: p.pageNumber,
-          text:       p.text,
-          documentId,
-        }));
+      const pageTexts = ocrResult.pages.map(p => ({
+        pageNumber: p.pageNumber,
+        text:       p.text,
+        documentId,
+      }));
+      const extracted = this.extraction.extractFromPages(pageTexts);
+      await this.upsertPropertyMaster(caseId, documentId, extracted);
+
+      await db.caseDocument.update({
+        where: { id: documentId },
+        data:  { extractionStatus: 'DONE' },
+      });
+
+      this.logger.log(
+        `[DOCS] Inline processed ${documentId} — ${extracted.length} fields, engine: ${ocrResult.engine}`,
+      );
+    } catch (e: any) {
+      this.logger.error(`[DOCS] Inline processing error for ${documentId}: ${e.message}`);
+      await db.caseDocument.update({
+        where: { id: documentId },
+        data:  { ocrStatus: 'FAILED', extractionStatus: 'FAILED' },
+      }).catch(() => null);
+    }
+  }
+
+  private runTesseractBackground(documentId: string, caseId: string, buffer: Buffer): void {
+    Promise.resolve().then(async () => {
+      const db = this.prisma as any;
+      try {
+        const ocrResult = await this.ocr.runTesseract(buffer);
+
+        for (const page of ocrResult.pages) {
+          await db.documentPage.upsert({
+            where:  { documentId_pageNumber: { documentId, pageNumber: page.pageNumber } },
+            create: {
+              id:         require('crypto').randomUUID(),
+              documentId,
+              pageNumber: page.pageNumber,
+              rawText:    page.text,
+              ocrStatus:  'DONE',
+              ocrEngine:  page.engine,
+              wordCount:  page.wordCount,
+            },
+            update: {
+              rawText:   page.text,
+              ocrStatus: 'DONE',
+              ocrEngine: page.engine,
+              wordCount: page.wordCount,
+            },
+          });
+        }
+
+        await db.caseDocument.update({
+          where: { id: documentId },
+          data:  { ocrStatus: 'DONE', extractionStatus: 'PROCESSING', pageCount: ocrResult.pages.length },
+        });
+
+        const pageTexts = ocrResult.pages.map(p => ({ pageNumber: p.pageNumber, text: p.text, documentId }));
         const extracted = this.extraction.extractFromPages(pageTexts);
         await this.upsertPropertyMaster(caseId, documentId, extracted);
 
@@ -153,19 +212,15 @@ export class DocumentsService {
           data:  { extractionStatus: 'DONE' },
         });
 
-        this.logger.log(
-          `[DOCS] Inline processed ${documentId} — ${extracted.length} fields, engine: ${ocrResult.engine}`,
-        );
-      } else {
-        this.logger.log(`[DOCS] ${documentId} skipped OCR (${ocrResult.engine}) — use Reprocess for Tesseract`);
+        this.logger.log(`[DOCS] Tesseract done for ${documentId} — ${extracted.length} fields`);
+      } catch (e: any) {
+        this.logger.error(`[DOCS] Tesseract background failed for ${documentId}: ${e.message}`);
+        await db.caseDocument.update({
+          where: { id: documentId },
+          data:  { ocrStatus: 'FAILED', extractionStatus: 'FAILED' },
+        }).catch(() => null);
       }
-    } catch (e: any) {
-      this.logger.error(`[DOCS] Inline processing error for ${documentId}: ${e.message}`);
-      await db.caseDocument.update({
-        where: { id: documentId },
-        data:  { ocrStatus: 'FAILED', extractionStatus: 'FAILED' },
-      }).catch(() => null);
-    }
+    }).catch(() => null);
   }
 
   private async upsertPropertyMaster(
