@@ -1,5 +1,6 @@
 import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { BullModule } from '@nestjs/bull';
 import { APP_GUARD, APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -32,6 +33,9 @@ import { ReportTemplatesModule } from './modules/report-templates/report-templat
 import { TravelModule } from './modules/travel/travel.module';
 import { LeaveModule } from './modules/leave/leave.module';
 import { PropertyIntelligenceModule } from './modules/property-intelligence/property-intelligence.module';
+import { DocumentsModule } from './modules/documents/documents.module';
+import { DocumentProcessingModule } from './modules/document-processing/document-processing.module';
+import { PropertyMasterModule } from './modules/property-master/property-master.module';
 
 @Module({
   imports: [
@@ -40,6 +44,15 @@ import { PropertyIntelligenceModule } from './modules/property-intelligence/prop
       isGlobal: true,
       load: [configuration],
       envFilePath: ['.env.local', '.env'],
+    }),
+
+    // Bull queue — Redis-backed job queue for OCR + document processing
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      inject:  [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        redis: config.get<string>('redis.url') ?? 'redis://localhost:6379',
+      }),
     }),
 
     // Rate limiting — cost: free (Redis not required for basic throttle)
@@ -73,6 +86,9 @@ import { PropertyIntelligenceModule } from './modules/property-intelligence/prop
     TravelModule,
     LeaveModule,
     PropertyIntelligenceModule,
+    DocumentProcessingModule,
+    DocumentsModule,
+    PropertyMasterModule,
   ],
 
   providers: [

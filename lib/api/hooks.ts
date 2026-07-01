@@ -82,6 +82,140 @@ export function useBackfillPropertyIntelligence() {
   });
 }
 
+// ── Case Documents ─────────────────────────────────────────────────────────
+
+export function useCaseDocuments(caseId: string) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ['case-documents', caseId],
+    queryFn:  () => api.documents.list(caseId),
+    enabled:  !!caseId,
+    staleTime: 10_000,
+    refetchInterval: (data: any) => {
+      const docs = Array.isArray(data) ? data : (data?.data ?? []);
+      const anyPending = docs.some((d: any) => d.ocrStatus === 'PENDING' || d.ocrStatus === 'PROCESSING');
+      return anyPending ? 5_000 : false;
+    },
+  });
+}
+
+export function useUploadDocument() {
+  const api = useApi();
+  const qc  = useQueryClient();
+  return useMutation({
+    mutationFn: ({ caseId, formData }: { caseId: string; formData: FormData }) =>
+      api.documents.upload(caseId, formData),
+    onSuccess: (_, { caseId }) => {
+      qc.invalidateQueries({ queryKey: ['case-documents', caseId] });
+      toast.success('Document uploaded — OCR processing started');
+    },
+    onError: (e: any) => toast.error(e.message ?? 'Upload failed'),
+  });
+}
+
+export function useDeleteDocument() {
+  const api = useApi();
+  const qc  = useQueryClient();
+  return useMutation({
+    mutationFn: ({ caseId, docId }: { caseId: string; docId: string }) =>
+      api.documents.delete(caseId, docId),
+    onSuccess: (_, { caseId }) => {
+      qc.invalidateQueries({ queryKey: ['case-documents', caseId] });
+      toast.success('Document deleted');
+    },
+    onError: (e: any) => toast.error(e.message ?? 'Delete failed'),
+  });
+}
+
+export function useReprocessDocument() {
+  const api = useApi();
+  const qc  = useQueryClient();
+  return useMutation({
+    mutationFn: ({ caseId, docId }: { caseId: string; docId: string }) =>
+      api.documents.reprocess(caseId, docId),
+    onSuccess: (_, { caseId }) => {
+      qc.invalidateQueries({ queryKey: ['case-documents', caseId] });
+      toast.success('Re-queued for OCR processing');
+    },
+    onError: (e: any) => toast.error(e.message ?? 'Reprocess failed'),
+  });
+}
+
+export function useUpdateDocumentShare() {
+  const api = useApi();
+  const qc  = useQueryClient();
+  return useMutation({
+    mutationFn: ({ caseId, share }: { caseId: string; share: boolean }) =>
+      api.documents.updateShare(caseId, share),
+    onSuccess: (_, { caseId }) => {
+      qc.invalidateQueries({ queryKey: ['case-documents', caseId] });
+    },
+    onError: (e: any) => toast.error(e.message ?? 'Failed to update sharing'),
+  });
+}
+
+export function useDocumentSignedUrl() {
+  const api = useApi();
+  return useMutation({
+    mutationFn: ({ caseId, docId }: { caseId: string; docId: string }) =>
+      api.documents.signedUrl(caseId, docId),
+    onError: (e: any) => toast.error(e.message ?? 'Failed to get download URL'),
+  });
+}
+
+// ── Property Master ────────────────────────────────────────────────────────
+
+export function usePropertyMaster(caseId: string) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ['property-master', caseId],
+    queryFn:  () => api.propertyMaster.get(caseId),
+    enabled:  !!caseId,
+    staleTime: 15_000,
+  });
+}
+
+export function useUpdatePropertyField() {
+  const api = useApi();
+  const qc  = useQueryClient();
+  return useMutation({
+    mutationFn: ({ caseId, fieldKey, fieldValue }: { caseId: string; fieldKey: string; fieldValue: string }) =>
+      api.propertyMaster.updateField(caseId, fieldKey, fieldValue),
+    onSuccess: (_, { caseId }) => {
+      qc.invalidateQueries({ queryKey: ['property-master', caseId] });
+    },
+    onError: (e: any) => toast.error(e.message ?? 'Failed to update field'),
+  });
+}
+
+export function useDeletePropertyField() {
+  const api = useApi();
+  const qc  = useQueryClient();
+  return useMutation({
+    mutationFn: ({ caseId, fieldKey }: { caseId: string; fieldKey: string }) =>
+      api.propertyMaster.deleteField(caseId, fieldKey),
+    onSuccess: (_, { caseId }) => {
+      qc.invalidateQueries({ queryKey: ['property-master', caseId] });
+      toast.success('Field removed');
+    },
+    onError: (e: any) => toast.error(e.message ?? 'Failed to delete field'),
+  });
+}
+
+export function useUpdatePropertyMasterStatus() {
+  const api = useApi();
+  const qc  = useQueryClient();
+  return useMutation({
+    mutationFn: ({ caseId, status }: { caseId: string; status: string }) =>
+      api.propertyMaster.updateStatus(caseId, status),
+    onSuccess: (_, { caseId }) => {
+      qc.invalidateQueries({ queryKey: ['property-master', caseId] });
+      toast.success('Status updated');
+    },
+    onError: (e: any) => toast.error(e.message ?? 'Failed to update status'),
+  });
+}
+
 export function usePropertySearch(address: string, pincode?: string) {
   const api = useApi();
   return useQuery({

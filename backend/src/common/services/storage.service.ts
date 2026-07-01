@@ -53,6 +53,23 @@ export class StorageService {
     );
   }
 
+  async downloadBuffer(key: string): Promise<Buffer | null> {
+    try {
+      const res = await this.s3.send(
+        new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+      );
+      const stream = res.Body as NodeJS.ReadableStream;
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      return Buffer.concat(chunks);
+    } catch (err) {
+      this.logger.warn(`Failed to download ${key}: ${err.message}`);
+      return null;
+    }
+  }
+
   async delete(key: string): Promise<void> {
     try {
       await this.s3.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));

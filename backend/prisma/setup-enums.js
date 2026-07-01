@@ -153,6 +153,128 @@ async function main() {
     'fk property_records → organizations',
   );
 
+  // ── Document Intelligence tables ──────────────────────────────────────────
+
+  await exec(`
+    CREATE TABLE IF NOT EXISTS "case_documents" (
+      "id"                TEXT NOT NULL,
+      "caseId"            TEXT NOT NULL,
+      "documentType"      TEXT NOT NULL DEFAULT 'OTHER',
+      "originalName"      TEXT NOT NULL,
+      "s3Key"             TEXT NOT NULL,
+      "mimeType"          TEXT NOT NULL,
+      "sizeBytes"         INTEGER NOT NULL DEFAULT 0,
+      "uploadedById"      TEXT NOT NULL,
+      "shareWithEngineer" BOOLEAN NOT NULL DEFAULT false,
+      "ocrStatus"         TEXT NOT NULL DEFAULT 'PENDING',
+      "extractionStatus"  TEXT NOT NULL DEFAULT 'PENDING',
+      "pageCount"         INTEGER,
+      "notes"             TEXT,
+      "createdAt"         TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt"         TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "case_documents_pkey" PRIMARY KEY ("id")
+    )
+  `, 'CREATE TABLE case_documents');
+
+  await exec(
+    `CREATE INDEX IF NOT EXISTS "case_documents_caseId_idx" ON "case_documents"("caseId")`,
+    'index case_documents_caseId',
+  );
+  await exec(
+    `ALTER TABLE "case_documents" ADD CONSTRAINT "case_documents_caseId_fkey" FOREIGN KEY ("caseId") REFERENCES "cases"("id") ON DELETE CASCADE ON UPDATE CASCADE`,
+    'fk case_documents → cases',
+  );
+
+  await exec(`
+    CREATE TABLE IF NOT EXISTS "document_pages" (
+      "id"          TEXT NOT NULL,
+      "documentId"  TEXT NOT NULL,
+      "pageNumber"  INTEGER NOT NULL,
+      "imageS3Key"  TEXT,
+      "rawText"     TEXT,
+      "ocrStatus"   TEXT NOT NULL DEFAULT 'PENDING',
+      "ocrEngine"   TEXT,
+      "wordCount"   INTEGER,
+      "createdAt"   TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "document_pages_pkey" PRIMARY KEY ("id"),
+      CONSTRAINT "document_pages_documentId_pageNumber_key" UNIQUE ("documentId", "pageNumber")
+    )
+  `, 'CREATE TABLE document_pages');
+
+  await exec(
+    `CREATE INDEX IF NOT EXISTS "document_pages_documentId_idx" ON "document_pages"("documentId")`,
+    'index document_pages_documentId',
+  );
+  await exec(
+    `ALTER TABLE "document_pages" ADD CONSTRAINT "document_pages_documentId_fkey" FOREIGN KEY ("documentId") REFERENCES "case_documents"("id") ON DELETE CASCADE ON UPDATE CASCADE`,
+    'fk document_pages → case_documents',
+  );
+
+  await exec(`
+    CREATE TABLE IF NOT EXISTS "property_master" (
+      "id"           TEXT NOT NULL,
+      "caseId"       TEXT NOT NULL,
+      "version"      INTEGER NOT NULL DEFAULT 1,
+      "status"       TEXT NOT NULL DEFAULT 'DRAFT',
+      "reviewedById" TEXT,
+      "reviewedAt"   TIMESTAMP(3),
+      "confirmedAt"  TIMESTAMP(3),
+      "masterJson"   JSONB,
+      "createdAt"    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt"    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "property_master_pkey" PRIMARY KEY ("id"),
+      CONSTRAINT "property_master_caseId_key" UNIQUE ("caseId")
+    )
+  `, 'CREATE TABLE property_master');
+
+  await exec(`
+    CREATE TABLE IF NOT EXISTS "property_fields" (
+      "id"               TEXT NOT NULL,
+      "propertyMasterId" TEXT NOT NULL,
+      "fieldKey"         TEXT NOT NULL,
+      "fieldValue"       TEXT,
+      "confidence"       DECIMAL(5,4),
+      "sourcePage"       INTEGER,
+      "sourceLine"       TEXT,
+      "sourceDocumentId" TEXT,
+      "isManualEdit"     BOOLEAN NOT NULL DEFAULT false,
+      "editedById"       TEXT,
+      "editedAt"         TIMESTAMP(3),
+      "createdAt"        TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt"        TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "property_fields_pkey" PRIMARY KEY ("id"),
+      CONSTRAINT "property_fields_masterId_fieldKey_key" UNIQUE ("propertyMasterId", "fieldKey")
+    )
+  `, 'CREATE TABLE property_fields');
+
+  await exec(
+    `CREATE INDEX IF NOT EXISTS "property_fields_masterId_idx" ON "property_fields"("propertyMasterId")`,
+    'index property_fields_masterId',
+  );
+  await exec(
+    `ALTER TABLE "property_fields" ADD CONSTRAINT "property_fields_masterId_fkey" FOREIGN KEY ("propertyMasterId") REFERENCES "property_master"("id") ON DELETE CASCADE ON UPDATE CASCADE`,
+    'fk property_fields → property_master',
+  );
+
+  await exec(`
+    CREATE TABLE IF NOT EXISTS "property_master_history" (
+      "id"               TEXT NOT NULL,
+      "propertyMasterId" TEXT NOT NULL,
+      "changedById"      TEXT NOT NULL,
+      "changeType"       TEXT NOT NULL,
+      "fieldKey"         TEXT,
+      "before"           TEXT,
+      "after"            TEXT,
+      "createdAt"        TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "property_master_history_pkey" PRIMARY KEY ("id")
+    )
+  `, 'CREATE TABLE property_master_history');
+
+  await exec(
+    `CREATE INDEX IF NOT EXISTS "property_master_history_masterId_idx" ON "property_master_history"("propertyMasterId")`,
+    'index property_master_history_masterId',
+  );
+
   // New employee columns
   await exec(
     `ALTER TABLE "employees" ADD COLUMN IF NOT EXISTS "employeeStatus" TEXT NOT NULL DEFAULT 'ACTIVE'`,

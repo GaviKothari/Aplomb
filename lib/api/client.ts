@@ -104,6 +104,29 @@ export function createApiClient(getToken: () => Promise<string | null>) {
       indexIntelligence: (caseId: string) => api<any>(`/cases/${caseId}/intelligence/index`, { method: 'POST' }),
     },
 
+    // Case Documents
+    documents: {
+      list:         (caseId: string)                          => api<any>(`/cases/${caseId}/documents`),
+      upload:       (caseId: string, formData: FormData)      => api<any>(`/cases/${caseId}/documents`, { method: 'POST', body: formData, isFormData: true }),
+      getOne:       (caseId: string, docId: string)           => api<any>(`/cases/${caseId}/documents/${docId}`),
+      signedUrl:    (caseId: string, docId: string)           => api<any>(`/cases/${caseId}/documents/${docId}/signed-url`),
+      updateType:   (caseId: string, docId: string, t: string)=> api<any>(`/cases/${caseId}/documents/${docId}/type`, { method: 'PATCH', body: { documentType: t } }),
+      reprocess:    (caseId: string, docId: string)           => api<any>(`/cases/${caseId}/documents/${docId}/reprocess`, { method: 'POST' }),
+      delete:       (caseId: string, docId: string)           => api<any>(`/cases/${caseId}/documents/${docId}`, { method: 'DELETE' }),
+      shareStatus:  (caseId: string)                          => api<any>(`/cases/${caseId}/documents/share-status`),
+      updateShare:  (caseId: string, share: boolean)          => api<any>(`/cases/${caseId}/documents/share`, { method: 'PATCH', body: { shareWithEngineer: share } }),
+      types:        ()                                         => api<any>(`/cases/x/documents/meta/types`),
+    },
+
+    // Property Master
+    propertyMaster: {
+      get:          (caseId: string)                                         => api<any>(`/cases/${caseId}/property-master`),
+      updateField:  (caseId: string, fieldKey: string, fieldValue: string)  => api<any>(`/cases/${caseId}/property-master/fields`, { method: 'PATCH', body: { fieldKey, fieldValue } }),
+      deleteField:  (caseId: string, fieldKey: string)                      => api<any>(`/cases/${caseId}/property-master/fields/${fieldKey}`, { method: 'DELETE' }),
+      updateStatus: (caseId: string, status: string)                        => api<any>(`/cases/${caseId}/property-master/status`, { method: 'PATCH', body: { status } }),
+      history:      (caseId: string)                                         => api<any>(`/cases/${caseId}/property-master/history`),
+    },
+
     // Property Intelligence — address search (no caseId)
     propertyIntelligence: {
       search: (address: string, pincode?: string) =>

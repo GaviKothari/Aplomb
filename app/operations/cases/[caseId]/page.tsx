@@ -15,6 +15,8 @@ import { VerificationTab } from '@/components/case-details/verification-tab'
 import { HistoryTab } from '@/components/case-details/history-tab'
 import { DemolitionAlertBanner } from '@/components/case-details/demolition-alert-banner'
 import { PropertyIntelligencePanel } from '@/components/case-details/property-intelligence-panel'
+import { DocumentsTab } from '@/components/case-details/documents-tab'
+import { PropertyMasterTab } from '@/components/case-details/property-master-tab'
 import { useCase, useFinalizeCase } from '@/lib/api/hooks'
 import { ArrowLeft, CheckCircle2, Loader2 } from 'lucide-react'
 import Link from 'next/link'
@@ -133,8 +135,10 @@ export default function CaseDetailPage() {
         </Card>
 
         <Tabs defaultValue="overview" className="w-full">
-          <TabsList className="grid w-full grid-cols-6">
+          <TabsList className="grid w-full grid-cols-8">
             <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="documents">Documents</TabsTrigger>
+            <TabsTrigger value="property-master">Property</TabsTrigger>
             <TabsTrigger value="report">Report</TabsTrigger>
             <TabsTrigger value="media">
               Media
@@ -146,13 +150,19 @@ export default function CaseDetailPage() {
             </TabsTrigger>
             <TabsTrigger value="verification">Verification</TabsTrigger>
             <TabsTrigger value="history">History</TabsTrigger>
-            <TabsTrigger value="intelligence">
-              Intelligence
-            </TabsTrigger>
+            <TabsTrigger value="intelligence">Intelligence</TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview" className="space-y-4">
             <OverviewTab caseData={caseData} />
+          </TabsContent>
+
+          <TabsContent value="documents" className="space-y-4">
+            <DocumentsTab caseId={caseId} />
+          </TabsContent>
+
+          <TabsContent value="property-master" className="space-y-4">
+            <PropertyMasterTab caseId={caseId} />
           </TabsContent>
 
           <TabsContent value="report" className="space-y-4">
