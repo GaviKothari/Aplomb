@@ -235,6 +235,10 @@ async function main() {
   `, 'CREATE TABLE property_fields');
 
   await exec(
+    `ALTER TABLE "property_fields" ADD COLUMN IF NOT EXISTS "label" TEXT`,
+    'column property_fields.label',
+  );
+  await exec(
     `CREATE INDEX IF NOT EXISTS "property_fields_masterId_idx" ON "property_fields"("propertyMasterId")`,
     'index property_fields_masterId',
   );

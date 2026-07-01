@@ -87,6 +87,8 @@ CREATE TABLE IF NOT EXISTS "property_fields" (
   CONSTRAINT "property_fields_masterId_fieldKey_key" UNIQUE ("propertyMasterId", "fieldKey")
 );
 
+ALTER TABLE "property_fields" ADD COLUMN IF NOT EXISTS "label" TEXT;
+
 CREATE INDEX IF NOT EXISTS "property_fields_masterId_idx"
   ON "property_fields"("propertyMasterId");
 
