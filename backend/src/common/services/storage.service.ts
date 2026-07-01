@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import * as https from 'https';
 
 @Injectable()
 export class StorageService {
@@ -18,6 +19,11 @@ export class StorageService {
     const accessKeyId = config.get<string>('r2.accessKeyId') ?? '';
     this.logger.log(`R2 init — endpoint: ${endpoint}, bucket: ${this.bucket}, hasKey: ${!!accessKeyId}`);
 
+    // Force TLS 1.2 minimum — Cloudflare R2 rejects SSLv3/TLS1.0 handshakes
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { NodeHttpHandler } = require('@smithy/node-http-handler') as any;
+    const httpsAgent = new https.Agent({ minVersion: 'TLSv1.2', maxVersion: 'TLSv1.3' });
+
     this.s3 = new S3Client({
       region: 'auto',
       endpoint,
@@ -26,6 +32,7 @@ export class StorageService {
         accessKeyId,
         secretAccessKey: config.get<string>('r2.secretAccessKey') ?? '',
       },
+      requestHandler: new NodeHttpHandler({ httpsAgent }),
     });
   }
 
