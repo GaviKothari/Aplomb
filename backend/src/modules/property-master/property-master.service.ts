@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PropertyFingerprintService } from './property-fingerprint.service';
 import { randomUUID } from 'crypto';
 
 export interface FieldUpdateDto {
@@ -8,9 +9,22 @@ export interface FieldUpdateDto {
   userId:      string;
 }
 
+export interface ExtractedField {
+  fieldKey:         string;
+  label:            string;
+  fieldValue:       string;
+  confidence:       number;
+  sourcePage:       number | null;
+  sourceLine:       string | null;
+  sourceDocumentId: string | null;
+}
+
 @Injectable()
 export class PropertyMasterService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma:       PrismaService,
+    private readonly fingerprints: PropertyFingerprintService,
+  ) {}
 
   async getForCase(caseId: string) {
     const db = this.prisma as any;
@@ -127,6 +141,64 @@ export class PropertyMasterService {
     return this.updateField(caseId, dto);
   }
 
+  async upsertFromExtraction(
+    caseId:     string,
+    documentId: string,
+    newFields:  ExtractedField[],
+  ): Promise<void> {
+    const db = this.prisma as any;
+
+    let master = await db.propertyMaster.findUnique({ where: { caseId } });
+    if (!master) {
+      master = await db.propertyMaster.create({
+        data: { id: randomUUID(), caseId, version: 1, status: 'DRAFT', masterJson: {} },
+      });
+    }
+
+    for (const f of newFields) {
+      const existing = await db.propertyField.findUnique({
+        where: { propertyMasterId_fieldKey: { propertyMasterId: master.id, fieldKey: f.fieldKey } },
+      });
+      if (!existing || (!existing.isManualEdit && Number(existing.confidence) < f.confidence)) {
+        await db.propertyField.upsert({
+          where:  { propertyMasterId_fieldKey: { propertyMasterId: master.id, fieldKey: f.fieldKey } },
+          create: {
+            id:               randomUUID(),
+            propertyMasterId: master.id,
+            fieldKey:         f.fieldKey,
+            label:            f.label,
+            fieldValue:       f.fieldValue,
+            confidence:       f.confidence,
+            sourcePage:       f.sourcePage,
+            sourceLine:       f.sourceLine,
+            sourceDocumentId: documentId,
+            isManualEdit:     false,
+          },
+          update: {
+            label:            f.label,
+            fieldValue:       f.fieldValue,
+            confidence:       f.confidence,
+            sourcePage:       f.sourcePage,
+            sourceLine:       f.sourceLine,
+            sourceDocumentId: documentId,
+            isManualEdit:     false,
+          },
+        });
+      }
+    }
+
+    // Reset status to DRAFT if new extraction arrives after review/confirm
+    const statusReset =
+      newFields.length > 0 && (master.status === 'CONFIRMED' || master.status === 'REVIEWED')
+        ? { status: 'DRAFT' }
+        : {};
+
+    await this.rebuildMasterJson(master.id, statusReset);
+
+    // Fire-and-forget: save property fingerprint for historical matching
+    this.fingerprints.saveFingerprint(caseId, newFields, {}).catch(() => null);
+  }
+
   async deleteField(caseId: string, fieldKey: string, userId: string) {
     const db   = this.prisma as any;
     const master = await db.propertyMaster.findUnique({ where: { caseId } });
@@ -157,7 +229,7 @@ export class PropertyMasterService {
     return this.getForCase(caseId);
   }
 
-  private async rebuildMasterJson(masterId: string): Promise<void> {
+  private async rebuildMasterJson(masterId: string, extra: Record<string, any> = {}): Promise<void> {
     const db     = this.prisma as any;
     const fields = await db.propertyField.findMany({ where: { propertyMasterId: masterId } });
     const masterJson: Record<string, string> = {};
@@ -166,7 +238,7 @@ export class PropertyMasterService {
     }
     await db.propertyMaster.update({
       where: { id: masterId },
-      data:  { masterJson, version: { increment: 1 } },
+      data:  { masterJson, version: { increment: 1 }, ...extra },
     });
   }
 
