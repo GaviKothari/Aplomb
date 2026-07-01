@@ -155,35 +155,22 @@ async function main() {
 
   // ── Document Intelligence tables ──────────────────────────────────────────
 
-  await exec(`
-    CREATE TABLE IF NOT EXISTS "case_documents" (
-      "id"                TEXT NOT NULL,
-      "caseId"            TEXT NOT NULL,
-      "documentType"      TEXT NOT NULL DEFAULT 'OTHER',
-      "originalName"      TEXT NOT NULL,
-      "s3Key"             TEXT NOT NULL,
-      "mimeType"          TEXT NOT NULL,
-      "sizeBytes"         INTEGER NOT NULL DEFAULT 0,
-      "uploadedById"      TEXT NOT NULL,
-      "shareWithEngineer" BOOLEAN NOT NULL DEFAULT false,
-      "ocrStatus"         TEXT NOT NULL DEFAULT 'PENDING',
-      "extractionStatus"  TEXT NOT NULL DEFAULT 'PENDING',
-      "pageCount"         INTEGER,
-      "notes"             TEXT,
-      "createdAt"         TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      "updatedAt"         TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      CONSTRAINT "case_documents_pkey" PRIMARY KEY ("id")
-    )
-  `, 'CREATE TABLE case_documents');
-
-  await exec(
-    `CREATE INDEX IF NOT EXISTS "case_documents_caseId_idx" ON "case_documents"("caseId")`,
-    'index case_documents_caseId',
-  );
-  await exec(
-    `ALTER TABLE "case_documents" ADD CONSTRAINT "case_documents_caseId_fkey" FOREIGN KEY ("caseId") REFERENCES "cases"("id") ON DELETE CASCADE ON UPDATE CASCADE`,
-    'fk case_documents → cases',
-  );
+  // case_documents already exists (from initial Prisma migration) — add OCR columns
+  await exec(`ALTER TABLE "case_documents" ADD COLUMN IF NOT EXISTS "documentType"      TEXT    NOT NULL DEFAULT 'OTHER'`,                   'case_documents.documentType');
+  await exec(`ALTER TABLE "case_documents" ADD COLUMN IF NOT EXISTS "originalName"      TEXT    NOT NULL DEFAULT ''`,                         'case_documents.originalName');
+  await exec(`ALTER TABLE "case_documents" ADD COLUMN IF NOT EXISTS "mimeType"          TEXT    NOT NULL DEFAULT 'application/octet-stream'`,  'case_documents.mimeType');
+  await exec(`ALTER TABLE "case_documents" ADD COLUMN IF NOT EXISTS "sizeBytes"         INTEGER NOT NULL DEFAULT 0`,                           'case_documents.sizeBytes');
+  await exec(`ALTER TABLE "case_documents" ADD COLUMN IF NOT EXISTS "shareWithEngineer" BOOLEAN NOT NULL DEFAULT false`,                       'case_documents.shareWithEngineer');
+  await exec(`ALTER TABLE "case_documents" ADD COLUMN IF NOT EXISTS "ocrStatus"         TEXT    NOT NULL DEFAULT 'PENDING'`,                   'case_documents.ocrStatus');
+  await exec(`ALTER TABLE "case_documents" ADD COLUMN IF NOT EXISTS "extractionStatus"  TEXT    NOT NULL DEFAULT 'PENDING'`,                   'case_documents.extractionStatus');
+  await exec(`ALTER TABLE "case_documents" ADD COLUMN IF NOT EXISTS "pageCount"         INTEGER`,                                              'case_documents.pageCount');
+  await exec(`ALTER TABLE "case_documents" ADD COLUMN IF NOT EXISTS "notes"             TEXT`,                                                 'case_documents.notes');
+  await exec(`ALTER TABLE "case_documents" ADD COLUMN IF NOT EXISTS "updatedAt"         TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP`,      'case_documents.updatedAt');
+  await exec(`ALTER TABLE "case_documents" ALTER COLUMN "fileName"      DROP NOT NULL`, 'case_documents.fileName nullable');
+  await exec(`ALTER TABLE "case_documents" ALTER COLUMN "fileType"      DROP NOT NULL`, 'case_documents.fileType nullable');
+  await exec(`ALTER TABLE "case_documents" ALTER COLUMN "fileSizeBytes" DROP NOT NULL`, 'case_documents.fileSizeBytes nullable');
+  await exec(`ALTER TABLE "case_documents" ALTER COLUMN "s3Bucket"      DROP NOT NULL`, 'case_documents.s3Bucket nullable');
+  await exec(`CREATE INDEX IF NOT EXISTS "case_documents_caseId_idx" ON "case_documents"("caseId")`, 'index case_documents_caseId');
 
   await exec(`
     CREATE TABLE IF NOT EXISTS "document_pages" (

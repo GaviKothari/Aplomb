@@ -456,21 +456,104 @@ model BulkImport {
 // ============================================================
 
 model CaseDocument {
-  id           String   @id @default(cuid())
-  caseId       String
-  case         Case     @relation(fields: [caseId], references: [id])
-  fileName     String
-  fileType     String   // pdf, jpg, docx, etc.
-  fileSizeBytes Int
-  s3Key        String
-  s3Bucket     String
-  cdnUrl       String?
-  category     String?  // title_deed, noc, identity_proof, etc.
-  uploadedById String
-  createdAt    DateTime @default(now())
+  id                String         @id @default(cuid())
+  caseId            String
+  case              Case           @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  documentType      String         @default("OTHER")
+  originalName      String         @default("")
+  s3Key             String
+  mimeType          String         @default("application/octet-stream")
+  sizeBytes         Int            @default(0)
+  uploadedById      String
+  shareWithEngineer Boolean        @default(false)
+  ocrStatus         String         @default("PENDING")
+  extractionStatus  String         @default("PENDING")
+  pageCount         Int?
+  notes             String?
+  // Legacy columns kept for rows created before this migration
+  fileName          String?
+  fileType          String?
+  fileSizeBytes     Int?
+  s3Bucket          String?
+  cdnUrl            String?
+  category          String?
+  pages             DocumentPage[]
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @default(now()) @updatedAt
 
   @@index([caseId])
   @@map("case_documents")
+}
+
+model DocumentPage {
+  id         String       @id @default(cuid())
+  documentId String
+  document   CaseDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  pageNumber Int
+  imageS3Key String?
+  rawText    String?
+  ocrStatus  String       @default("PENDING")
+  ocrEngine  String?
+  wordCount  Int?
+  createdAt  DateTime     @default(now())
+
+  @@unique([documentId, pageNumber])
+  @@index([documentId])
+  @@map("document_pages")
+}
+
+model PropertyMaster {
+  id           String                  @id @default(cuid())
+  caseId       String                  @unique
+  version      Int                     @default(1)
+  status       String                  @default("DRAFT")
+  reviewedById String?
+  reviewedAt   DateTime?
+  confirmedAt  DateTime?
+  masterJson   Json?
+  fields       PropertyField[]
+  history      PropertyMasterHistory[]
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @default(now()) @updatedAt
+
+  @@map("property_master")
+}
+
+model PropertyField {
+  id               String         @id @default(cuid())
+  propertyMasterId String
+  master           PropertyMaster @relation(fields: [propertyMasterId], references: [id], onDelete: Cascade)
+  fieldKey         String
+  fieldValue       String?
+  label            String?
+  confidence       Decimal?       @db.Decimal(5, 4)
+  sourcePage       Int?
+  sourceLine       String?
+  sourceDocumentId String?
+  isManualEdit     Boolean        @default(false)
+  editedById       String?
+  editedAt         DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @default(now()) @updatedAt
+
+  @@unique([propertyMasterId, fieldKey])
+  @@index([propertyMasterId])
+  @@map("property_fields")
+}
+
+model PropertyMasterHistory {
+  id               String         @id @default(cuid())
+  propertyMasterId String
+  master           PropertyMaster @relation(fields: [propertyMasterId], references: [id], onDelete: Cascade)
+  changedById      String
+  changeType       String
+  fieldKey         String?
+  before           String?
+  after            String?
+  createdAt        DateTime       @default(now())
+
+  @@index([propertyMasterId])
+  @@map("property_master_history")
 }
 
 model CaseMedia {
