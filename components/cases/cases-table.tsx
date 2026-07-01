@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import {
   Table,
@@ -12,9 +12,133 @@ import {
 } from '@/components/ui/table'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Case } from '@/types'
+import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 import { StatusBadge } from './status-badge'
 import { CaseFilters, FilterState } from './case-filters'
+import { useUploadDocument } from '@/lib/api/hooks'
+import { Upload, Loader2, FileText } from 'lucide-react'
+
+const DOCUMENT_TYPES = [
+  { value: 'SALE_DEED',               label: 'Sale Deed' },
+  { value: 'REGISTRY_COPY',           label: 'Registry Copy' },
+  { value: 'MUTATION_KHATAUNI',        label: 'Mutation / Khatauni' },
+  { value: 'PROPERTY_TAX_RECEIPT',    label: 'Property Tax Receipt' },
+  { value: 'FLOOR_PLAN',              label: 'Floor Plan' },
+  { value: 'LAYOUT_PLAN',             label: 'Layout Plan' },
+  { value: 'POSSESSION_CERTIFICATE',  label: 'Possession Certificate' },
+  { value: 'BUILDING_PLAN',           label: 'Building Plan / Sanction' },
+  { value: 'NOC',                     label: 'NOC / Approval Letter' },
+  { value: 'ENCUMBRANCE_CERTIFICATE', label: 'Encumbrance Certificate' },
+  { value: 'LOAN_AGREEMENT',          label: 'Loan Agreement' },
+  { value: 'VALUATION_REPORT',        label: 'Previous Valuation Report' },
+  { value: 'OTHER',                   label: 'Other' },
+]
+
+function UploadDocModal({
+  caseId,
+  caseNumber,
+  open,
+  onClose,
+}: {
+  caseId: string
+  caseNumber: string
+  open: boolean
+  onClose: () => void
+}) {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [docType, setDocType] = useState('OTHER')
+  const [file, setFile] = useState<File | null>(null)
+  const upload = useUploadDocument()
+
+  const handleSubmit = () => {
+    if (!file) return
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('documentType', docType)
+    upload.mutate(
+      { caseId, formData: fd },
+      {
+        onSuccess: () => {
+          setFile(null)
+          setDocType('OTHER')
+          onClose()
+        },
+      },
+    )
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose() }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="text-base">Upload Document</DialogTitle>
+          <p className="text-xs text-muted-foreground font-mono">{caseNumber}</p>
+        </DialogHeader>
+
+        <div className="space-y-4 pt-1">
+          <div className="space-y-1.5">
+            <Label className="text-xs">Document type</Label>
+            <Select value={docType} onValueChange={setDocType}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {DOCUMENT_TYPES.map(t => (
+                  <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div
+            className="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:border-blue-300 hover:bg-muted/30 transition-colors"
+            onClick={() => fileRef.current?.click()}
+          >
+            {file ? (
+              <div className="flex items-center justify-center gap-2 text-sm">
+                <FileText className="w-4 h-4 text-blue-500" />
+                <span className="font-medium truncate max-w-[200px]">{file.name}</span>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <Upload className="w-6 h-6 text-muted-foreground/40 mx-auto" />
+                <p className="text-xs text-muted-foreground">Click to choose file</p>
+                <p className="text-xs text-muted-foreground/60">PDF, JPG, PNG — max 20 MB</p>
+              </div>
+            )}
+          </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".pdf,.jpg,.jpeg,.png"
+            className="hidden"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          />
+
+          <div className="flex gap-2 justify-end pt-1">
+            <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+            <Button
+              size="sm"
+              disabled={!file || upload.isPending}
+              onClick={handleSubmit}
+              className="gap-1.5"
+            >
+              {upload.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+              Upload
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 interface CasesTableProps {
   cases: any[]  // accepts raw API shape or legacy mock shape
@@ -47,6 +171,7 @@ export function CasesTable({ cases }: CasesTableProps) {
     priorities: [],
     engineers: [],
   })
+  const [uploadTarget, setUploadTarget] = useState<{ id: string; caseNumber: string } | null>(null)
 
   const filteredCases = useMemo(() => {
     return cases.map(normalise).filter((caseItem) => {
@@ -102,6 +227,7 @@ export function CasesTable({ cases }: CasesTableProps) {
                 <TableHead className="text-xs font-semibold">Priority</TableHead>
                 <TableHead className="text-xs font-semibold">Created Date</TableHead>
                 <TableHead className="text-xs font-semibold">Last Updated</TableHead>
+                <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -132,11 +258,25 @@ export function CasesTable({ cases }: CasesTableProps) {
                     <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                       {caseItem.lastUpdated ? new Date(caseItem.lastUpdated).toLocaleDateString('en-IN') : '—'}
                     </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                        title="Upload document"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          setUploadTarget({ id: caseItem.id, caseNumber: caseItem.caseNumber ?? caseItem.id })
+                        }}
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                     No cases found matching your filters.
                   </TableCell>
                 </TableRow>
@@ -149,6 +289,15 @@ export function CasesTable({ cases }: CasesTableProps) {
       <div className="text-sm text-muted-foreground">
         Showing {filteredCases.length} of {cases.length} cases
       </div>
+
+      {uploadTarget && (
+        <UploadDocModal
+          caseId={uploadTarget.id}
+          caseNumber={uploadTarget.caseNumber}
+          open={!!uploadTarget}
+          onClose={() => setUploadTarget(null)}
+        />
+      )}
     </div>
   )
 }
