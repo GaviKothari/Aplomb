@@ -78,6 +78,81 @@ async function main() {
     'reports.roadWidth → DECIMAL(8,2)',
   );
 
+  // property_records table (bypasses Prisma migration state issues)
+  await exec(`
+    CREATE TABLE IF NOT EXISTS "property_records" (
+      "id"                  TEXT NOT NULL,
+      "caseId"              TEXT NOT NULL,
+      "organizationId"      TEXT NOT NULL,
+      "rawAddress"          TEXT NOT NULL,
+      "normalizedAddress"   TEXT,
+      "flatNumber"          TEXT,
+      "floorNumber"         TEXT,
+      "towerName"           TEXT,
+      "societyName"         TEXT,
+      "locality"            TEXT,
+      "sector"              TEXT,
+      "city"                TEXT NOT NULL,
+      "pincode"             TEXT NOT NULL,
+      "latitude"            DECIMAL(10,8),
+      "longitude"           DECIMAL(11,8),
+      "propertyType"        TEXT,
+      "propertyDescription" TEXT,
+      "totalArea"           DECIMAL(10,2),
+      "builtUpArea"         DECIMAL(10,2),
+      "carpetArea"          DECIMAL(10,2),
+      "plotArea"            DECIMAL(10,2),
+      "totalFloors"         INTEGER,
+      "ageOfConstruction"   INTEGER,
+      "facingDirection"     TEXT,
+      "constructionStage"   TEXT,
+      "amenities"           TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+      "roadWidth"           DECIMAL(8,2),
+      "totalMarketValue"    DECIMAL(15,2),
+      "ratePerSqFt"         DECIMAL(10,2),
+      "landRatePerSqFt"     DECIMAL(10,2),
+      "buildingRatePerSqFt" DECIMAL(10,2),
+      "distressValue"       DECIMAL(15,2),
+      "bankName"            TEXT,
+      "engineerName"        TEXT,
+      "siteObservations"    TEXT,
+      "reportDate"          TIMESTAMP(3),
+      "valuationYear"       INTEGER,
+      "createdAt"           TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt"           TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "property_records_pkey" PRIMARY KEY ("id")
+    )
+  `, 'CREATE TABLE property_records');
+
+  await exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS "property_records_caseId_key" ON "property_records"("caseId")`,
+    'index property_records_caseId',
+  );
+  await exec(
+    `CREATE INDEX IF NOT EXISTS "property_records_organizationId_idx" ON "property_records"("organizationId")`,
+    'index property_records_organizationId',
+  );
+  await exec(
+    `CREATE INDEX IF NOT EXISTS "property_records_pincode_organizationId_idx" ON "property_records"("pincode", "organizationId")`,
+    'index property_records_pincode',
+  );
+  await exec(
+    `CREATE INDEX IF NOT EXISTS "property_records_societyName_organizationId_idx" ON "property_records"("societyName", "organizationId")`,
+    'index property_records_societyName',
+  );
+  await exec(
+    `CREATE INDEX IF NOT EXISTS "property_records_valuationYear_organizationId_idx" ON "property_records"("valuationYear", "organizationId")`,
+    'index property_records_valuationYear',
+  );
+  await exec(
+    `ALTER TABLE "property_records" ADD CONSTRAINT "property_records_caseId_fkey" FOREIGN KEY ("caseId") REFERENCES "cases"("id") ON DELETE RESTRICT ON UPDATE CASCADE`,
+    'fk property_records → cases',
+  );
+  await exec(
+    `ALTER TABLE "property_records" ADD CONSTRAINT "property_records_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "organizations"("id") ON DELETE RESTRICT ON UPDATE CASCADE`,
+    'fk property_records → organizations',
+  );
+
   // New employee columns
   await exec(
     `ALTER TABLE "employees" ADD COLUMN IF NOT EXISTS "employeeStatus" TEXT NOT NULL DEFAULT 'ACTIVE'`,
