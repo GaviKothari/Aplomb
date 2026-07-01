@@ -14,6 +14,7 @@ import { MediaTab } from '@/components/case-details/media-tab'
 import { VerificationTab } from '@/components/case-details/verification-tab'
 import { HistoryTab } from '@/components/case-details/history-tab'
 import { DemolitionAlertBanner } from '@/components/case-details/demolition-alert-banner'
+import { PropertyIntelligencePanel } from '@/components/case-details/property-intelligence-panel'
 import { useCase, useFinalizeCase } from '@/lib/api/hooks'
 import { ArrowLeft, CheckCircle2, Loader2 } from 'lucide-react'
 import Link from 'next/link'
@@ -132,7 +133,7 @@ export default function CaseDetailPage() {
         </Card>
 
         <Tabs defaultValue="overview" className="w-full">
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="report">Report</TabsTrigger>
             <TabsTrigger value="media">
@@ -145,6 +146,9 @@ export default function CaseDetailPage() {
             </TabsTrigger>
             <TabsTrigger value="verification">Verification</TabsTrigger>
             <TabsTrigger value="history">History</TabsTrigger>
+            <TabsTrigger value="intelligence">
+              Intelligence
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview" className="space-y-4">
@@ -165,6 +169,10 @@ export default function CaseDetailPage() {
 
           <TabsContent value="history" className="space-y-4">
             <HistoryTab caseId={caseId} />
+          </TabsContent>
+
+          <TabsContent value="intelligence" className="space-y-4">
+            <PropertyIntelligencePanel caseId={caseId} />
           </TabsContent>
         </Tabs>
       </div>

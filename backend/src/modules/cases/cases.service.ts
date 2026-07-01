@@ -8,6 +8,7 @@ import { AssignCaseDto } from './dto/assign-case.dto';
 import { CaseStatus, UserRole, ReportStatus, MediaType, MediaCategory, Prisma } from '@prisma/client';
 import { EventsGateway } from '../../gateways/events.gateway';
 import { StorageService } from '../../common/services/storage.service';
+import { PropertyIntelligenceService } from '../property-intelligence/property-intelligence.service';
 
 // Valid status transitions
 const STATUS_TRANSITIONS: Record<CaseStatus, CaseStatus[]> = {
@@ -32,6 +33,7 @@ export class CasesService {
     private readonly prisma: PrismaService,
     private readonly events: EventsGateway,
     private readonly storage: StorageService,
+    private readonly propertyIntelligence: PropertyIntelligenceService,
   ) {}
 
   async create(dto: CreateCaseDto, createdById: string) {
@@ -196,6 +198,18 @@ export class CasesService {
       fromStatus: c.status,
       toStatus: dto.status,
     });
+
+    // Auto-index into property knowledge base at key milestones (fire and forget)
+    const INDEX_ON: CaseStatus[] = [
+      CaseStatus.SITE_VISIT_COMPLETED,
+      CaseStatus.FINALIZED,
+      CaseStatus.SENT_TO_BANK,
+    ];
+    if (INDEX_ON.includes(dto.status)) {
+      this.propertyIntelligence.indexCase(id).catch(e =>
+        this.logger.warn(`[PI] auto-index failed for ${id}: ${e.message}`),
+      );
+    }
 
     return updated;
   }
@@ -375,6 +389,12 @@ export class CasesService {
     }
 
     this.events.emitCaseUpdate(caseId, 'field_data_submitted', { caseId, reportId: report.id });
+
+    // Re-index property record whenever engineer saves field data (fire and forget)
+    this.propertyIntelligence.indexCase(caseId).catch(e =>
+      this.logger.warn(`[PI] re-index after field save failed for ${caseId}: ${e.message}`),
+    );
+
     return report;
   }
 

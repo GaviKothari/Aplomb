@@ -31,6 +31,7 @@ import { DemolitionModule } from './modules/demolition/demolition.module';
 import { ReportTemplatesModule } from './modules/report-templates/report-templates.module';
 import { TravelModule } from './modules/travel/travel.module';
 import { LeaveModule } from './modules/leave/leave.module';
+import { PropertyIntelligenceModule } from './modules/property-intelligence/property-intelligence.module';
 
 @Module({
   imports: [
@@ -71,6 +72,7 @@ import { LeaveModule } from './modules/leave/leave.module';
     ReportTemplatesModule,
     TravelModule,
     LeaveModule,
+    PropertyIntelligenceModule,
   ],
 
   providers: [

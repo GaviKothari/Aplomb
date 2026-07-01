@@ -100,6 +100,8 @@ export function createApiClient(getToken: () => Promise<string | null>) {
         api<any>(`/cases/${id}/photos`, { method: 'POST', body: formData, isFormData: true }),
       getReport: (id: string) => api<any>(`/cases/${id}/report`),
       generatePdf: (reportId: string) => api<any>(`/reports/${reportId}/pdf`, { method: 'POST' }),
+      intelligence: (caseId: string) => api<any>(`/cases/${caseId}/intelligence`),
+      indexIntelligence: (caseId: string) => api<any>(`/cases/${caseId}/intelligence/index`, { method: 'POST' }),
     },
 
     // Organizations (banks)

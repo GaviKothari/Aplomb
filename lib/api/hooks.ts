@@ -49,6 +49,29 @@ export function useCase(id: string) {
   });
 }
 
+export function usePropertyIntelligence(caseId: string) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ['property-intelligence', caseId],
+    queryFn:  () => api.cases.intelligence(caseId),
+    enabled:  !!caseId,
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useIndexPropertyIntelligence() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (caseId: string) => api.cases.indexIntelligence(caseId),
+    onSuccess: (_, caseId) => {
+      qc.invalidateQueries({ queryKey: ['property-intelligence', caseId] });
+      toast.success('Property indexed successfully');
+    },
+    onError: (e: any) => toast.error(e.message ?? 'Failed to index property'),
+  });
+}
+
 export function useCaseHistory(id: string) {
   const api = useApi();
   return useQuery({

@@ -248,6 +248,7 @@ model Organization {
   invoices        Invoice[]
   branches        BankBranch[]
   reportTemplates ReportTemplate[]
+  propertyRecords PropertyRecord[]
 
   @@map("organizations")
 }
@@ -387,6 +388,7 @@ model Case {
   invoiceItems     InvoiceLineItem[]
   auditLogs        AuditLog[]
   siteVisitLog     SiteVisitLog?
+  propertyRecord   PropertyRecord?
 
   @@index([organizationId])
   @@index([engineerId])
@@ -1235,4 +1237,71 @@ model MisSnapshot {
 
   @@unique([snapshotDate, organizationId])
   @@map("mis_snapshots")
+}
+
+// ============================================================
+// PROPERTY INTELLIGENCE
+// ============================================================
+
+model PropertyRecord {
+  id              String       @id @default(cuid())
+
+  // Source
+  caseId          String       @unique
+  case            Case         @relation(fields: [caseId], references: [id])
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id])
+
+  // Address — raw + heuristically parsed
+  rawAddress        String
+  normalizedAddress String?      // lowercase, stripped — cheap exact-match index
+  flatNumber        String?
+  floorNumber       String?
+  towerName         String?
+  societyName       String?      // KEY: used for "same building" queries
+  locality          String?
+  sector            String?
+  city              String
+  pincode           String
+
+  // Geo
+  latitude        Decimal?  @db.Decimal(10, 8)
+  longitude       Decimal?  @db.Decimal(11, 8)
+
+  // Property
+  propertyType        String?
+  propertyDescription String?
+  totalArea           Decimal?  @db.Decimal(10, 2)
+  builtUpArea         Decimal?  @db.Decimal(10, 2)
+  carpetArea          Decimal?  @db.Decimal(10, 2)
+  plotArea            Decimal?  @db.Decimal(10, 2)
+  totalFloors         Int?
+  ageOfConstruction   Int?
+  facingDirection     String?
+  constructionStage   String?
+  amenities           String[]
+  roadWidth           Decimal?  @db.Decimal(8, 2)
+
+  // Valuation
+  totalMarketValue    Decimal?  @db.Decimal(15, 2)
+  ratePerSqFt         Decimal?  @db.Decimal(10, 2)
+  landRatePerSqFt     Decimal?  @db.Decimal(10, 2)
+  buildingRatePerSqFt Decimal?  @db.Decimal(10, 2)
+  distressValue       Decimal?  @db.Decimal(15, 2)
+
+  // Context
+  bankName          String?
+  engineerName      String?
+  siteObservations  String?
+  reportDate        DateTime?
+  valuationYear     Int?         // extracted year for GROUP BY trend queries
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([organizationId])
+  @@index([pincode, organizationId])
+  @@index([societyName, organizationId])
+  @@index([valuationYear, organizationId])
+  @@map("property_records")
 }

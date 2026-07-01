@@ -18,6 +18,7 @@ node_modules/.bin/prisma migrate resolve --applied  20260630000000_employee_cler
 node_modules/.bin/prisma migrate resolve --rolled-back 20260701000000_property_type_to_string 2>/dev/null || true
 
 node_modules/.bin/prisma migrate resolve --rolled-back 20260701000001_expand_road_width_precision 2>/dev/null || true
+node_modules/.bin/prisma migrate resolve --applied  20260701000002_property_records 2>/dev/null || true
 echo "[start] Running pending migrations..."
 node_modules/.bin/prisma migrate deploy || true
 
