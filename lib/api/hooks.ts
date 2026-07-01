@@ -72,6 +72,16 @@ export function useIndexPropertyIntelligence() {
   });
 }
 
+export function useBackfillPropertyIntelligence() {
+  const api = useApi();
+  return useMutation({
+    mutationFn: () => api.propertyIntelligence.backfill(),
+    onSuccess: (data: any) =>
+      toast.success(`Backfill started — ${data.total} cases queued for indexing`),
+    onError: (e: any) => toast.error(e.message ?? 'Backfill failed'),
+  });
+}
+
 export function usePropertySearch(address: string, pincode?: string) {
   const api = useApi();
   return useQuery({

@@ -358,6 +358,39 @@ export class PropertyIntelligenceService {
     };
   }
 
+  // ── Backfill all existing cases ───────────────────────────────────────────
+
+  async backfillAll(): Promise<{ started: boolean; total: number }> {
+    const db = this.prisma as any;
+
+    // Which cases are already indexed?
+    const indexed = await db.propertyRecord.findMany({ select: { caseId: true } });
+    const indexedSet = new Set(indexed.map((r: any) => r.caseId));
+
+    const allCases = await this.prisma.case.findMany({ select: { id: true } });
+    const toIndex  = allCases.filter(c => !indexedSet.has(c.id)).map(c => c.id);
+
+    this.logger.log(`[PI] Backfill queued: ${toIndex.length} cases (${indexedSet.size} already indexed)`);
+
+    // Run in background — don't await so the HTTP response returns immediately
+    this.runBackfill(toIndex).catch(e => this.logger.warn(`[PI] Backfill error: ${e.message}`));
+
+    return { started: true, total: toIndex.length };
+  }
+
+  private async runBackfill(caseIds: string[]): Promise<void> {
+    let done = 0;
+    for (const id of caseIds) {
+      await this.indexCase(id);
+      done++;
+      if (done % 100 === 0) {
+        this.logger.log(`[PI] Backfill progress: ${done}/${caseIds.length}`);
+      }
+      if (done % 50 === 0) await new Promise(r => setTimeout(r, 100));
+    }
+    this.logger.log(`[PI] Backfill complete: ${done} cases indexed`);
+  }
+
   // ── Address search (no caseId — used on the new-case form) ──────────────
 
   async searchByAddress(address: string, pincode?: string): Promise<{

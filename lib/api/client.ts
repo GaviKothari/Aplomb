@@ -108,6 +108,8 @@ export function createApiClient(getToken: () => Promise<string | null>) {
     propertyIntelligence: {
       search: (address: string, pincode?: string) =>
         api<any>('/property-intelligence/search', { params: { address, ...(pincode ? { pincode } : {}) } }),
+      backfill: () =>
+        api<any>('/property-intelligence/backfill', { method: 'POST' }),
     },
 
     // Organizations (banks)

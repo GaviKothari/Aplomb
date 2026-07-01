@@ -6,13 +6,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { MapPin, Save } from 'lucide-react'
+import { Database, Loader2, MapPin, Save } from 'lucide-react'
 import { mockOfficeLocations } from '@/lib/mock-data'
+import { useBackfillPropertyIntelligence } from '@/lib/api/hooks'
 
 export default function SystemSettingsPage() {
   const [locations, setLocations] = useState(mockOfficeLocations)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [formData, setFormData] = useState<any>({})
+  const backfill = useBackfillPropertyIntelligence()
 
   const handleEdit = (location: any) => {
     setEditingId(location.id)
@@ -218,6 +220,48 @@ export default function SystemSettingsPage() {
                   <p className="text-emerald-600 dark:text-emerald-400">Status: Outside radius (exceeds 100m limit)</p>
                 </div>
               </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Property Knowledge Base */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Database className="w-5 h-5" />
+              Property Knowledge Base
+            </CardTitle>
+            <CardDescription>
+              Index all existing cases into the comparable sales engine so prior valuations appear on new cases
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-lg border border-blue-100 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-900 p-4 text-sm text-blue-800 dark:text-blue-300">
+              <p className="font-medium mb-1">How it works</p>
+              <p className="text-blue-700 dark:text-blue-400 text-xs leading-relaxed">
+                Each finalized case is automatically indexed going forward. Use this one-time backfill
+                to index all historical cases so the intelligence engine has full data from day one.
+                The backfill runs in the background — you can leave this page immediately.
+              </p>
+            </div>
+            <div className="flex items-center gap-4">
+              <Button
+                onClick={() => backfill.mutate()}
+                disabled={backfill.isPending || backfill.isSuccess}
+                className="gap-2"
+              >
+                {backfill.isPending
+                  ? <><Loader2 className="w-4 h-4 animate-spin" />Queuing cases…</>
+                  : backfill.isSuccess
+                  ? <><Database className="w-4 h-4" />Backfill Started</>
+                  : <><Database className="w-4 h-4" />Backfill All Cases</>
+                }
+              </Button>
+              {backfill.isSuccess && (
+                <p className="text-sm text-emerald-600 dark:text-emerald-400">
+                  ✓ {(backfill.data as any)?.total ?? 0} cases queued — indexing in background
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>

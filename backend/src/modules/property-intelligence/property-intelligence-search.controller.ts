@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { PropertyIntelligenceService } from './property-intelligence.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -15,5 +15,11 @@ export class PropertyIntelligenceSearchController {
     @Query('pincode') pincode?: string,
   ) {
     return this.service.searchByAddress(address, pincode);
+  }
+
+  /** Backfill all existing cases into property_records. Runs in background. */
+  @Post('backfill')
+  backfill() {
+    return this.service.backfillAll();
   }
 }
