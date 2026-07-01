@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 
 import { AppLayout } from '@/components/layout/app-layout'
@@ -43,7 +43,11 @@ import {
   useMatchDemolitionCase,
   usePropertySearch,
   useApi,
+  useUploadDocument,
+  useUpdateDocumentShare,
 } from '@/lib/api/hooks'
+import { FileText, Trash2, Upload, Share2 } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
 
 const PROPERTY_TYPES = [
   'APF PROJECT',
@@ -129,6 +133,22 @@ const INDIAN_STATES = [
 ]
 
 const AREA_UNITS = ['sqft', 'sqm', 'sqyd', 'acres', 'cents', 'guntha', 'bigha']
+
+const DOCUMENT_TYPES = [
+  { value: 'SALE_DEED',               label: 'Sale Deed' },
+  { value: 'REGISTRY_COPY',           label: 'Registry Copy' },
+  { value: 'MUTATION_KHATAUNI',        label: 'Mutation / Khatauni' },
+  { value: 'PROPERTY_TAX_RECEIPT',    label: 'Property Tax Receipt' },
+  { value: 'FLOOR_PLAN',              label: 'Floor Plan' },
+  { value: 'LAYOUT_PLAN',             label: 'Layout Plan' },
+  { value: 'POSSESSION_CERTIFICATE',  label: 'Possession Certificate' },
+  { value: 'BUILDING_PLAN',           label: 'Building Plan / Sanction' },
+  { value: 'NOC',                     label: 'NOC / Approval Letter' },
+  { value: 'ENCUMBRANCE_CERTIFICATE', label: 'Encumbrance Certificate' },
+  { value: 'LOAN_AGREEMENT',          label: 'Loan Agreement' },
+  { value: 'VALUATION_REPORT',        label: 'Previous Valuation Report' },
+  { value: 'OTHER',                   label: 'Other' },
+]
 
 const CONFIDENCE_STYLES: Record<string, { badge: string; row: string }> = {
   HIGH:   { badge: 'bg-red-600 text-white',     row: 'bg-red-100 dark:bg-red-900/30 border-red-200 dark:border-red-800' },
@@ -420,7 +440,21 @@ export default function AddNewCasePage() {
   const { data: engineersData } = useEmployees({ limit: 100 })
   const employees: any[] = engineersData?.data ?? engineersData ?? []
 
-  const matchCase = useMatchDemolitionCase()
+  const matchCase       = useMatchDemolitionCase()
+  const uploadDoc       = useUploadDocument()
+  const updateShare     = useUpdateDocumentShare()
+
+  // ── Staged documents (uploaded after case creation) ───────────────────
+  const [stagedDocs, setStagedDocs] = useState<Array<{ file: File; docType: string; id: string }>>([])
+  const [shareWithEngineer, setShareWithEngineer] = useState(false)
+  const [docType, setDocType] = useState('OTHER')
+  const docFileRef = useRef<HTMLInputElement>(null)
+
+  const addStagedDoc = (file: File) => {
+    setStagedDocs(prev => [...prev, { file, docType, id: Math.random().toString(36).slice(2) }])
+  }
+
+  const removeStagedDoc = (id: string) => setStagedDocs(prev => prev.filter(d => d.id !== id))
 
   const set = (field: string) => (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -509,9 +543,20 @@ export default function AddNewCasePage() {
 
     try {
       const result = await createCase.mutateAsync(body)
-      // Auto-run demolition cross-match in background
       if (result?.id) {
         matchCase.mutate(result.id)
+        // Upload staged documents in sequence then set share flag
+        if (stagedDocs.length > 0) {
+          for (const staged of stagedDocs) {
+            const fd = new FormData()
+            fd.append('file', staged.file)
+            fd.append('documentType', staged.docType)
+            await uploadDoc.mutateAsync({ caseId: result.id, formData: fd }).catch(() => {})
+          }
+          if (shareWithEngineer) {
+            updateShare.mutate({ caseId: result.id, share: true })
+          }
+        }
       }
       router.push('/operations/cases')
     } catch {
@@ -947,6 +992,111 @@ export default function AddNewCasePage() {
                   onChange={set('notes')}
                   className="resize-none"
                 />
+              </CardContent>
+            </Card>
+
+            {/* Section 7: Documents */}
+            <Card>
+              <CardHeader className="pb-0 pt-5 px-5">
+                <SectionHeader
+                  icon={FileText}
+                  title="Bank Documents"
+                  subtitle="Upload property documents — OCR extraction starts automatically after case is created"
+                />
+              </CardHeader>
+              <CardContent className="px-5 pb-5 space-y-4">
+                {/* Share toggle */}
+                <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
+                  <div className="flex items-center gap-2">
+                    <Share2 className="w-4 h-4 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm font-medium">Share documents with field engineer</p>
+                      <p className="text-xs text-muted-foreground">Engineer can view these docs on mobile app</p>
+                    </div>
+                  </div>
+                  <Switch checked={shareWithEngineer} onCheckedChange={setShareWithEngineer} />
+                </div>
+
+                {/* Picker row */}
+                <div className="flex items-center gap-2">
+                  <Select value={docType} onValueChange={setDocType}>
+                    <SelectTrigger className="h-8 text-xs w-56 shrink-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DOCUMENT_TYPES.map(t => (
+                        <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 h-8 text-xs"
+                    onClick={() => docFileRef.current?.click()}
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    Add File
+                  </Button>
+                  <input
+                    ref={docFileRef}
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0]
+                      if (f) { addStagedDoc(f); e.target.value = '' }
+                    }}
+                  />
+                </div>
+
+                {/* Staged list */}
+                {stagedDocs.length === 0 ? (
+                  <div
+                    className="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:border-primary/40 hover:bg-muted/20 transition-colors"
+                    onClick={() => docFileRef.current?.click()}
+                  >
+                    <Upload className="w-7 h-7 text-muted-foreground/30 mx-auto mb-1.5" />
+                    <p className="text-xs text-muted-foreground">Drop files here or click "Add File"</p>
+                    <p className="text-xs text-muted-foreground/60">PDF, JPG, PNG — max 20 MB each</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {stagedDocs.map(d => {
+                      const typeLabel = DOCUMENT_TYPES.find(t => t.value === d.docType)?.label ?? d.docType
+                      return (
+                        <div key={d.id} className="flex items-center gap-2 p-2.5 rounded-lg border bg-muted/20">
+                          <FileText className="w-4 h-4 shrink-0 text-blue-500" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium truncate">{d.file.name}</p>
+                            <p className="text-[10px] text-muted-foreground">{typeLabel}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeStagedDoc(d.id)}
+                            className="text-muted-foreground hover:text-red-500 transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )
+                    })}
+                    <button
+                      type="button"
+                      className="w-full text-xs text-primary hover:underline py-1"
+                      onClick={() => docFileRef.current?.click()}
+                    >
+                      + Add another file
+                    </button>
+                  </div>
+                )}
+
+                {stagedDocs.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {stagedDocs.length} file{stagedDocs.length > 1 ? 's' : ''} will be uploaded when the case is created
+                  </p>
+                )}
               </CardContent>
             </Card>
           </div>
