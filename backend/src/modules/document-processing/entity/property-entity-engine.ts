@@ -63,8 +63,11 @@ export class PropertyEntityEngine {
   // ── Per-field extraction ───────────────────────────────────────────────────
 
   private extractField(field: EntityField, page: PageInput): ExtractedEntity | null {
-    const text       = page.text;
-    const lowerText  = text.toLowerCase();
+    const text = page.text;
+    // Collapse single newlines → space so multi-word keywords survive OCR line breaks.
+    // "Sale\nConsideration" → "Sale Consideration". Double newlines (paragraphs) kept.
+    const flatText  = text.replace(/(?<!\n)\n(?!\n)/g, ' ');
+    const lowerFlat = flatText.toLowerCase();
     let best: ExtractedEntity | null = null;
 
     const tryKeywords = (keywords: string[], isStrong: boolean) => {
@@ -73,7 +76,7 @@ export class PropertyEntityEngine {
         let searchFrom = 0;
 
         while (true) {
-          const idx = lowerText.indexOf(kwLower, searchFrom);
+          const idx = lowerFlat.indexOf(kwLower, searchFrom);
           if (idx === -1) break;
           searchFrom = idx + kwLower.length;
 
@@ -168,16 +171,14 @@ export class PropertyEntityEngine {
 
       case 'text':
       default: {
-        // Take until first hard break: double-newline, or >80 chars on one line
-        const line = window
-          .split(/\n{2,}|\r\n\r\n/)[0]          // stop at paragraph break
-          .split('\n')[0]                         // take first line
-          .replace(/^[\s:।—\-–]+/, '')           // strip leading junk
-          .replace(/\s+/g, ' ')
-          .trim();
-        // Must be at least 2 chars and not look like a page header/number
-        if (line.length < 2 || /^\d+$/.test(line)) return null;
-        return line.slice(0, 120);
+        // Split at first paragraph break, then try each line in order.
+        // This handles: keyword on its own line → value is the NEXT line.
+        const paragraph = window.split(/\n{2,}|\r\n\r\n/)[0];
+        const lines = paragraph
+          .split('\n')
+          .map(l => l.replace(/^[\s\t:：।—\-–|]+/, '').replace(/\s+/g, ' ').trim())
+          .filter(l => l.length >= 2 && !/^\d+$/.test(l) && !/^page\s*\d+/i.test(l));
+        return lines[0]?.slice(0, 120) ?? null;
       }
     }
   }
